@@ -1,6 +1,6 @@
 -- RSS | God Mode Menu (Optimized)
 -- Автор:
-local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
+local Rayfield = loadstring(game:HttpGet("https://raw.githubusercontent.com/dzubabogdan62-sketch/Rss_script/main/Rss_script"))()
 
 local Window = Rayfield:CreateWindow({
    Name = "RSS | God Mode Menu",
