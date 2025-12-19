@@ -1,0 +1,522 @@
+
+local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
+
+local Window = Rayfield:CreateWindow({
+   Name = "RSS | God Mode Menu",
+   LoadingTitle = "Загрузка системы притяжения...",
+   LoadingSubtitle = "by Claude AI for Delta",
+   ConfigurationSaving = { Enabled = false }
+})
+
+local Tab = Window:CreateTab("⚽ Функции Мяча", 4483362458)
+local TabGoalkeeper = Window:CreateTab("🥅 Вратарь", 4483362458)
+
+-- Настройки
+local Settings = {
+    MagnetEnabled = false,
+    Method = "Плавное притяжение",
+    Range = 25,
+    Strength = 50,
+    ShowRadius = false,
+    AutoSave = false,
+    SaveDistance = 20,
+    SaveSpeed = 120,
+    AutoMove = true
+}
+
+-- Визуализация радиуса
+local radiusPart = nil
+local goalkeeperZone = nil
+
+local function createRadiusVisual()
+    if radiusPart then radiusPart:Destroy() end
+    
+    radiusPart = Instance.new("Part")
+    radiusPart.Name = "MagnetRadius"
+    radiusPart.Anchored = true
+    radiusPart.CanCollide = false
+    radiusPart.Shape = Enum.PartType.Ball
+    radiusPart.Material = Enum.Material.ForceField
+    radiusPart.Color = Color3.fromRGB(0, 255, 255)
+    radiusPart.Transparency = 0.7
+    radiusPart.Size = Vector3.new(Settings.Range * 2, Settings.Range * 2, Settings.Range * 2)
+    radiusPart.Parent = workspace
+    
+    local highlight = Instance.new("SelectionBox")
+    highlight.LineThickness = 0.05
+    highlight.Color3 = Color3.fromRGB(0, 255, 255)
+    highlight.SurfaceColor3 = Color3.fromRGB(0, 255, 255)
+    highlight.SurfaceTransparency = 0.9
+    highlight.Adornee = radiusPart
+    highlight.Parent = radiusPart
+    
+    return radiusPart
+end
+
+local function updateRadiusVisual()
+    if Settings.ShowRadius and radiusPart then
+        local char = game.Players.LocalPlayer.Character
+        if char and char:FindFirstChild("HumanoidRootPart") then
+            radiusPart.Position = char.HumanoidRootPart.Position
+            radiusPart.Size = Vector3.new(Settings.Range * 2, Settings.Range * 2, Settings.Range * 2)
+        end
+    end
+end
+
+-- УЛУЧШЕННЫЙ ПОИСК МЯЧА (для игры, не лобби!)
+local function getBall()
+    -- Сначала ищем в активных зонах игры
+    local awayPosition = workspace:FindFirstChild("AwayPosition")
+    local homePosition = workspace:FindFirstChild("HomePosition")
+    
+    -- Проверяем мячи в игровых зонах
+    if awayPosition or homePosition then
+        for _, v in pairs(workspace:GetDescendants()) do
+            if v.Name == "SoccerBall" and v:IsA("BasePart") then
+                -- Исключаем мячи из лобби
+                local fullPath = v:GetFullName()
+                if not fullPath:find("Lobby") and not fullPath:find("SoccerBalls") then
+                    -- Это игровой мяч!
+                    return v
+                end
+            end
+        end
+    end
+    
+    -- Альтернативный поиск: ищем мяч который движется
+    for _, v in pairs(workspace:GetDescendants()) do
+        if v.Name == "SoccerBall" and v:IsA("BasePart") then
+            if v.AssemblyLinearVelocity.Magnitude > 0.1 or v.Parent.Name ~= "SoccerBalls" then
+                return v
+            end
+        end
+    end
+    
+    -- Последний вариант: любой мяч не в лобби
+    for _, v in pairs(workspace:GetDescendants()) do
+        if v.Name == "SoccerBall" and v:IsA("BasePart") then
+            if not v:GetFullName():find("Lobby") then
+                return v
+            end
+        end
+    end
+    
+    return nil
+end
+
+-- ПОИСК ВОРОТ (улучшенный)
+local function findGoal()
+    -- Ищем GolieCenter (центр ворот)
+    local awayGoal = workspace:FindFirstChild("AwayPosition")
+    local homeGoal = workspace:FindFirstChild("HomePosition")
+    
+    if awayGoal then
+        local goalieCenter = awayGoal:FindFirstChild("GoalieCenter")
+        if goalieCenter then return goalieCenter end
+    end
+    
+    if homeGoal then
+        local goalieCenter = homeGoal:FindFirstChild("GoalieCenter")
+        if goalieCenter then return goalieCenter end
+    end
+    
+    -- Альтернативный поиск
+    for _, v in pairs(workspace:GetDescendants()) do
+        if v.Name == "GoalieCenter" and v:IsA("BasePart") then
+            return v
+        end
+    end
+    
+    return nil
+end
+
+-- Определяем, в каких воротах мы стоим
+local function getMyGoal()
+    local player = game.Players.LocalPlayer
+    local char = player.Character
+    if not char or not char:FindFirstChild("HumanoidRootPart") then return nil end
+    
+    local hrp = char.HumanoidRootPart
+    
+    -- Ищем ближайший GoalieCenter
+    local awayGoal = workspace:FindFirstChild("AwayPosition")
+    local homeGoal = workspace:FindFirstChild("HomePosition")
+    
+    local closestGoal = nil
+    local closestDist = math.huge
+    
+    if awayGoal and awayGoal:FindFirstChild("GoalieCenter") then
+        local dist = (hrp.Position - awayGoal.GoalieCenter.Position).Magnitude
+        if dist < closestDist then
+            closestDist = dist
+            closestGoal = awayGoal.GoalieCenter
+        end
+    end
+    
+    if homeGoal and homeGoal:FindFirstChild("GoalieCenter") then
+        local dist = (hrp.Position - homeGoal.GoalieCenter.Position).Magnitude
+        if dist < closestDist then
+            closestDist = dist
+            closestGoal = homeGoal.GoalieCenter
+        end
+    end
+    
+    return closestGoal
+end
+
+-- Основной цикл
+local RunService = game:GetService("RunService")
+local connection
+
+local function startMagnet()
+    if connection then connection:Disconnect() end
+    
+    connection = RunService.Heartbeat:Connect(function()
+        -- Обновление радиуса
+        if Settings.ShowRadius then
+            updateRadiusVisual()
+        end
+        
+        local player = game.Players.LocalPlayer
+        local char = player.Character
+        if not char then return end
+        
+        local hrp = char:FindFirstChild("HumanoidRootPart")
+        if not hrp then return end
+        
+        local ball = getBall()
+        if not ball then return end
+        
+        -- === РЕЖИМ ВРАТАРЯ (УЛУЧШЕННЫЙ) ===
+        if Settings.AutoSave then
+            local myGoal = getMyGoal()
+            
+            if myGoal then
+                -- Обновляем визуализацию зоны
+                if goalkeeperZone then
+                    goalkeeperZone.Position = myGoal.Position
+                    goalkeeperZone.Size = Vector3.new(Settings.SaveDistance * 2, Settings.SaveDistance * 2, Settings.SaveDistance * 2)
+                end
+                
+                local distBallToGoal = (myGoal.Position - ball.Position).Magnitude
+                local distPlayerToGoal = (myGoal.Position - hrp.Position).Magnitude
+                
+                -- Если мяч приближается к воротам
+                if distBallToGoal <= Settings.SaveDistance then
+                    local ballVelocity = ball.AssemblyLinearVelocity
+                    
+                    -- Проверяем направление мяча (летит ли к воротам?)
+                    local directionToGoal = (myGoal.Position - ball.Position).Unit
+                    local ballDirection = ballVelocity.Unit
+                    local dotProduct = directionToGoal:Dot(ballDirection)
+                    
+                    -- Если мяч летит К воротам (dotProduct > 0) и быстро
+                    if ballVelocity.Magnitude > 5 and dotProduct > 0.3 then
+                        -- Получаем владение мячом
+                        pcall(function()
+                            ball.AssemblyLinearVelocity = ball.AssemblyLinearVelocity
+                        end)
+                        
+                        -- ОТБИВАЕМ МЯЧ от ворот
+                        local saveDirection = (ball.Position - myGoal.Position).Unit
+                        saveDirection = Vector3.new(saveDirection.X, 0.3, saveDirection.Z).Unit -- Немного вверх
+                        
+                        ball.AssemblyLinearVelocity = saveDirection * Settings.SaveSpeed
+                        
+                        -- Двигаем персонажа к мячу (если включено)
+                        if Settings.AutoMove and distPlayerToGoal < Settings.SaveDistance then
+                            local moveTo = ball.Position
+                            hrp.CFrame = CFrame.new(
+                                hrp.Position:Lerp(moveTo, 0.4),
+                                moveTo
+                            )
+                        end
+                        
+                        -- Уведомление
+                        if math.random(1, 10) == 1 then -- Не спамим уведомлениями
+                            Rayfield:Notify({
+                                Title = "🥅 СЕЙВ!", 
+                                Content = "Мяч отбит!", 
+                                Duration = 1
+                            })
+                        end
+                    end
+                end
+            end
+        end
+        
+        -- === МАГНИТ МЯЧА ===
+        if Settings.MagnetEnabled then
+            local distance = (hrp.Position - ball.Position).Magnitude
+            
+            if distance <= Settings.Range then
+                pcall(function()
+                    ball.AssemblyLinearVelocity = ball.AssemblyLinearVelocity
+                end)
+                
+                if Settings.Method == "Физическая сила" then
+                    local direction = (hrp.Position - ball.Position).Unit
+                    local speed = math.clamp(distance * 2, 20, Settings.Strength)
+                    ball.AssemblyLinearVelocity = direction * speed
+                
+                elseif Settings.Method == "Жесткое прилипание" then
+                    ball.CFrame = hrp.CFrame * CFrame.new(0, -2.5, -3)
+                    ball.AssemblyLinearVelocity = hrp.AssemblyLinearVelocity
+                    ball.AssemblyAngularVelocity = Vector3.new(0, 0, 0)
+                
+                elseif Settings.Method == "Векторный захват" then
+                    if not ball:FindFirstChild("BV_Magnet") then
+                        local bv = Instance.new("BodyVelocity")
+                        bv.Name = "BV_Magnet"
+                        bv.MaxForce = Vector3.new(5e4, 5e4, 5e4)
+                        bv.Parent = ball
+                    end
+                    
+                    local bv = ball:FindFirstChild("BV_Magnet")
+                    if bv then
+                        bv.Velocity = (hrp.Position - ball.Position).Unit * 70
+                    end
+                
+                elseif Settings.Method == "Плавное притяжение" then
+                    local direction = (hrp.Position - ball.Position).Unit
+                    local currentVel = ball.AssemblyLinearVelocity
+                    local targetVel = direction * Settings.Strength
+                    ball.AssemblyLinearVelocity = currentVel:Lerp(targetVel, 0.3)
+                end
+            else
+                if ball:FindFirstChild("BV_Magnet") then
+                    ball.BV_Magnet:Destroy()
+                end
+            end
+        end
+    end)
+end
+
+startMagnet()
+
+-- === ВКЛАДКА: ФУНКЦИИ МЯЧА ===
+Tab:CreateToggle({
+   Name = "🧲 Включить Магнит",
+   CurrentValue = false,
+   Callback = function(Value) 
+       Settings.MagnetEnabled = Value 
+       if Value then
+           Rayfield:Notify({
+               Title = "✅ Магнит активирован", 
+               Content = "Радиус: " .. Settings.Range .. "м", 
+               Duration = 3
+           })
+       else
+           local ball = getBall()
+           if ball and ball:FindFirstChild("BV_Magnet") then
+               ball.BV_Magnet:Destroy()
+           end
+       end
+   end,
+})
+
+Tab:CreateToggle({
+   Name = "👁️ Показать радиус действия",
+   CurrentValue = false,
+   Callback = function(Value) 
+       Settings.ShowRadius = Value 
+       if Value then
+           createRadiusVisual()
+       else
+           if radiusPart then 
+               radiusPart:Destroy() 
+               radiusPart = nil
+           end
+       end
+   end,
+})
+
+Tab:CreateDropdown({
+   Name = "⚙️ Метод притяжения",
+   Options = {"Физическая сила", "Жесткое прилипание", "Векторный захват", "Плавное притяжение"},
+   CurrentValue = "Плавное притяжение",
+   Callback = function(Option) 
+       Settings.Method = Option 
+       local ball = getBall()
+       if ball and ball:FindFirstChild("BV_Magnet") then
+           ball.BV_Magnet:Destroy()
+       end
+   end,
+})
+
+Tab:CreateSlider({
+   Name = "📏 Дистанция захвата",
+   Range = {10, 100},
+   Increment = 5,
+   CurrentValue = 25,
+   Callback = function(Value) 
+       Settings.Range = Value 
+       if radiusPart then
+           radiusPart.Size = Vector3.new(Value * 2, Value * 2, Value * 2)
+       end
+   end,
+})
+
+Tab:CreateSlider({
+   Name = "💪 Сила магнита",
+   Range = {10, 150},
+   Increment = 10,
+   CurrentValue = 50,
+   Callback = function(Value) Settings.Strength = Value end,
+})
+
+Tab:CreateSection("🔧 Дополнительные функции")
+
+Tab:CreateButton({
+   Name = "🔍 Найти мяч (дебаг)",
+   Callback = function()
+       local ball = getBall()
+       if ball then
+           local char = game.Players.LocalPlayer.Character
+           if char and char:FindFirstChild("HumanoidRootPart") then
+               local dist = (char.HumanoidRootPart.Position - ball.Position).Magnitude
+               Rayfield:Notify({
+                   Title = "✅ Игровой мяч найден!", 
+                   Content = "Дистанция: " .. math.floor(dist) .. "м | " .. ball:GetFullName(), 
+                   Duration = 6
+               })
+           end
+       else
+           Rayfield:Notify({
+               Title = "❌ Мяч не найден", 
+               Content = "Зайдите в матч!", 
+               Duration = 4
+           })
+       end
+   end,
+})
+
+Tab:CreateButton({
+   Name = "📍 Телепорт к мячу",
+   Callback = function()
+       local ball = getBall()
+       local char = game.Players.LocalPlayer.Character
+       if ball and char and char:FindFirstChild("HumanoidRootPart") then
+           char.HumanoidRootPart.CFrame = ball.CFrame * CFrame.new(0, 5, 0)
+           Rayfield:Notify({Title = "✅ Телепорт выполнен", Content = "", Duration = 2})
+       end
+   end,
+})
+
+-- === ВКЛАДКА: ВРАТАРЬ ===
+TabGoalkeeper:CreateToggle({
+   Name = "🥅 Авто-сейв (Вратарь)",
+   CurrentValue = false,
+   Callback = function(Value) 
+       Settings.AutoSave = Value 
+       if Value then
+           Rayfield:Notify({
+               Title = "🥅 Режим вратаря активирован", 
+               Content = "Встаньте в ворота! Все удары будут отбиты!", 
+               Duration = 4
+           })
+       else
+           Rayfield:Notify({
+               Title = "❌ Авто-сейв выключен", 
+               Content = "", 
+               Duration = 2
+           })
+       end
+   end,
+})
+
+TabGoalkeeper:CreateToggle({
+   Name = "🏃 Автодвижение к мячу",
+   CurrentValue = true,
+   Callback = function(Value) 
+       Settings.AutoMove = Value 
+   end,
+})
+
+TabGoalkeeper:CreateSlider({
+   Name = "📏 Радиус защиты ворот",
+   Range = {10, 40},
+   Increment = 2,
+   CurrentValue = 20,
+   Callback = function(Value) Settings.SaveDistance = Value end,
+})
+
+TabGoalkeeper:CreateSlider({
+   Name = "⚡ Скорость отбивания",
+   Range = {60, 250},
+   Increment = 10,
+   CurrentValue = 120,
+   Callback = function(Value) Settings.SaveSpeed = Value end,
+})
+
+TabGoalkeeper:CreateToggle({
+   Name = "👁️ Показать зону защиты",
+   CurrentValue = false,
+   Callback = function(Value) 
+       if Value then
+           if not goalkeeperZone then
+               goalkeeperZone = Instance.new("Part")
+               goalkeeperZone.Name = "GoalkeeperZone"
+               goalkeeperZone.Anchored = true
+               goalkeeperZone.CanCollide = false
+               goalkeeperZone.Shape = Enum.PartType.Ball
+               goalkeeperZone.Material = Enum.Material.Neon
+               goalkeeperZone.Color = Color3.fromRGB(255, 50, 50)
+               goalkeeperZone.Transparency = 0.75
+               goalkeeperZone.Size = Vector3.new(Settings.SaveDistance * 2, Settings.SaveDistance * 2, Settings.SaveDistance * 2)
+               goalkeeperZone.Parent = workspace
+               
+               local highlight = Instance.new("SelectionBox")
+               highlight.LineThickness = 0.08
+               highlight.Color3 = Color3.fromRGB(255, 0, 0)
+               highlight.Adornee = goalkeeperZone
+               highlight.Parent = goalkeeperZone
+           end
+       else
+           if goalkeeperZone then 
+               goalkeeperZone:Destroy() 
+               goalkeeperZone = nil
+           end
+       end
+   end,
+})
+
+TabGoalkeeper:CreateSection("ℹ️ Информация")
+
+TabGoalkeeper:CreateParagraph({
+   Title = "Как работает авто-сейв?",
+   Content = "Встаньте в ворота (GoalieCenter). Когда мяч летит В СТОРОНУ ваших ворот на скорости, скрипт автоматически отбивает его. Работает ТОЛЬКО в игре, не в лобби!"
+})
+
+TabGoalkeeper:CreateButton({
+   Name = "🎯 Найти ворота (дебаг)",
+   Callback = function()
+       local goal = getMyGoal()
+       if goal then
+           local dist = (game.Players.LocalPlayer.Character.HumanoidRootPart.Position - goal.Position).Magnitude
+           Rayfield:Notify({
+               Title = "✅ Ваши ворота найдены", 
+               Content = "Дистанция до ворот: " .. math.floor(dist) .. "м", 
+               Duration = 5
+           })
+       else
+           Rayfield:Notify({
+               Title = "⚠️ Ворота не найдены", 
+               Content = "Зайдите в матч!", 
+               Duration = 3
+           })
+       end
+   end,
+})
+
+TabGoalkeeper:CreateButton({
+   Name = "📍 Телепорт в ворота",
+   Callback = function()
+       local goal = getMyGoal()
+       local char = game.Players.LocalPlayer.Character
+       if goal and char and char:FindFirstChild("HumanoidRootPart") then
+           char.HumanoidRootPart.CFrame = goal.CFrame * CFrame.new(0, 3, 5)
+           Rayfield:Notify({Title = "✅ Вы в воротах!", Content = "", Duration = 2})
+       end
+   end,
+})
