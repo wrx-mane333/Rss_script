@@ -32,11 +32,11 @@ local goalkeeperZone = nil
 -- Кэши и таймеры
 local cachedBall = nil
 local lastBallSearch = 0
-local ballSearchInterval = 0.8 -- секунд
+local ballSearchInterval = 0.3 -- секунд (уменьшено для более частого поиска)
 
 local cachedGoal = nil
 local lastGoalCheck = 0
-local goalCheckInterval = 1.5 -- секунд
+local goalCheckInterval = 0.5 -- секунд (уменьшено для более частой проверки)
 
 local lastUpdate = 0
 local logicInterval = 0.06 -- ~16 логик/сек
@@ -140,45 +140,68 @@ local function isBallValid(v)
     return true
 end
 
-local function getBallCached()
-    -- проверяем кеш
-    if cachedBall and cachedBall.Parent and cachedBall:IsA("BasePart") then
-        return cachedBall
-    end
-
-    -- throttle поиска
-    if tick() - lastBallSearch < ballSearchInterval then
-        return nil
-    end
-    lastBallSearch = tick()
-
-    -- первым делом ищем в игровых зонах (AwayPosition/HomePosition)
-    local found = nil
-    local awayPosition = workspace:FindFirstChild("AwayPosition")
-    local homePosition = workspace:FindFirstChild("HomePosition")
-    if awayPosition or homePosition then
-        for _, v in ipairs(workspace:GetDescendants()) do
-            if isBallValid(v) then
-                found = v
-                break
-            end
+local function getBallCached(forceSearch)
+    -- проверяем кеш (если не принудительный поиск)
+    if not forceSearch and cachedBall and cachedBall.Parent and cachedBall:IsA("BasePart") then
+        -- Проверяем, что мяч все еще валиден
+        local full = cachedBall:GetFullName()
+        if not full:find("Lobby") and not full:find("SoccerBalls") then
+            return cachedBall
+        else
+            -- Кеш устарел, очищаем
+            cachedBall = nil
         end
     end
 
-    -- если не нашли — ищем любой мяч, который движется или не в лобби
+    -- throttle поиска (если не принудительный)
+    if not forceSearch and tick() - lastBallSearch < ballSearchInterval then
+        return cachedBall -- возвращаем кеш даже если он устарел
+    end
+    lastBallSearch = tick()
+
+    local found = nil
+    local player = Players.LocalPlayer
+    local char = player and player.Character
+    local playerPos = char and char:FindFirstChild("HumanoidRootPart") and char.HumanoidRootPart.Position
+    
+    -- Сначала ищем ближайший мяч к игроку (если есть позиция)
+    if playerPos then
+        local closestBall = nil
+        local closestDist = math.huge
+        
+        for _, v in ipairs(workspace:GetDescendants()) do
+            if v:IsA("BasePart") and v.Name == "SoccerBall" then
+                local full = v:GetFullName()
+                -- Пропускаем мячи из лобби
+                if not full:find("Lobby") and not full:find("SoccerBalls") then
+                    local dist = (v.Position - playerPos).Magnitude
+                    if dist < closestDist then
+                        closestDist = dist
+                        closestBall = v
+                    end
+                end
+            end
+        end
+        
+        if closestBall then
+            found = closestBall
+        end
+    end
+    
+    -- Если не нашли по близости, ищем любой валидный мяч
     if not found then
         for _, v in ipairs(workspace:GetDescendants()) do
             if v:IsA("BasePart") and v.Name == "SoccerBall" then
-                local ok = true
                 local full = v:GetFullName()
-                if full:find("Lobby") then ok = false end
-                if ok then
+                -- Пропускаем только лобби
+                if not full:find("Lobby") then
+                    -- Предпочитаем движущиеся мячи
                     if v.AssemblyLinearVelocity and v.AssemblyLinearVelocity.Magnitude > 0.1 then
                         found = v
                         break
-                    elseif not full:find("SoccerBalls") then
+                    elseif not found then
+                        -- Если нет движущихся, берем первый не-лобби мяч
                         found = v
-                        break
                     end
                 end
             end
@@ -316,13 +339,23 @@ local function startMagnet()
         end
 
         -- используем кэшированный мяч / ворота
+        -- Принудительно ищем мяч если его нет в кеше
         local ball = getBallCached()
+        if not ball then
+            ball = getBallCached(true) -- принудительный поиск
+        end
         local myGoal = getMyGoalCached()
 
         -- =========================
         -- АВТО-СЕЙВ (вратарь)
         -- =========================
-        if Settings.AutoSave and myGoal and ball then
+        if Settings.AutoSave and myGoal then
+            -- Если мяч не найден, пытаемся найти его принудительно
+            if not ball then
+                ball = getBallCached(true)
+            end
+            
+            if ball then
             -- Вычисляем направление к воротам
             local toGoal = (myGoal.Position - ball.Position)
             local distToGoalNow = toGoal.Magnitude
@@ -386,6 +419,12 @@ local function startMagnet()
                             })
                         end
                     end
+                end
+            else
+                -- Мяч не найден - выводим предупреждение редко
+                if math.random(1, 100) == 1 then
+                    -- Тихий дебаг (можно закомментировать)
+                    -- print("[RSS] Мяч не найден для авто-сейва")
                 end
             end
         end
@@ -472,6 +511,9 @@ Tab:CreateToggle({
    Callback = function(Value) 
        Settings.MagnetEnabled = Value 
        if Value then
+           -- Принудительно ищем мяч при включении
+           cachedBall = nil
+           getBallCached(true)
            Rayfield:Notify({
                Title = "✅ Магнит активирован", 
                Content = "Радиус: " .. Settings.Range .. "м", 
@@ -534,22 +576,43 @@ Tab:CreateSection("🔧 Дополнительные функции")
 Tab:CreateButton({
    Name = "🔍 Найти мяч (дебаг)",
    Callback = function()
-       local ball = getBallCached() or getBallCached() -- попытка получить сейчас
+       -- Принудительный поиск мяча
+       cachedBall = nil -- очищаем кеш
+       local ball = getBallCached(true) -- принудительный поиск
        if ball then
            local char = Players.LocalPlayer.Character
            if char and char:FindFirstChild("HumanoidRootPart") then
                local dist = (char.HumanoidRootPart.Position - ball.Position).Magnitude
+               local vel = ball.AssemblyLinearVelocity
+               local velMag = vel and vel.Magnitude or 0
                Rayfield:Notify({
                    Title = "✅ Игровой мяч найден!", 
-                   Content = "Дистанция: " .. math.floor(dist) .. "м | " .. ball:GetFullName(), 
+                   Content = "Дистанция: " .. math.floor(dist) .. "м | Скорость: " .. math.floor(velMag) .. " | " .. ball:GetFullName(), 
                    Duration = 6
+               })
+           else
+               Rayfield:Notify({
+                   Title = "✅ Мяч найден", 
+                   Content = "Но персонаж не загружен | " .. ball:GetFullName(), 
+                   Duration = 4
                })
            end
        else
+           -- Пробуем найти все мячи для дебага
+           local allBalls = {}
+           for _, v in ipairs(workspace:GetDescendants()) do
+               if v:IsA("BasePart") and v.Name == "SoccerBall" then
+                   table.insert(allBalls, v:GetFullName())
+               end
+           end
+           local debugInfo = "Найдено мячей: " .. #allBalls
+           if #allBalls > 0 then
+               debugInfo = debugInfo .. "\nПервый: " .. allBalls[1]
+           end
            Rayfield:Notify({
-               Title = "❌ Мяч не найден", 
-               Content = "Зайдите в матч!", 
-               Duration = 4
+               Title = "❌ Игровой мяч не найден", 
+               Content = debugInfo, 
+               Duration = 6
            })
        end
    end,
@@ -576,6 +639,12 @@ TabGoalkeeper:CreateToggle({
    Callback = function(Value) 
        Settings.AutoSave = Value 
            if Value then
+               -- Принудительно ищем мяч и ворота при включении
+               cachedBall = nil
+               cachedGoal = nil
+               getBallCached(true)
+               getMyGoalCached()
+               
                Rayfield:Notify({
                    Title = "🥅 Режим вратаря активирован", 
                    Content = "Встаньте в ворота! Скрипт попытается отбивать мячи", 
@@ -653,7 +722,7 @@ TabGoalkeeper:CreateParagraph({
 TabGoalkeeper:CreateButton({
    Name = "🎯 Найти ворота (дебаг)",
    Callback = function()
-       local goal = getMyGoalCached() or findGoal()
+       local goal = getMyGoalCached() or findMyGoal()
        if goal then
            local char = Players.LocalPlayer.Character
            if char and char:FindFirstChild("HumanoidRootPart") then
@@ -683,7 +752,7 @@ TabGoalkeeper:CreateButton({
 TabGoalkeeper:CreateButton({
    Name = "📍 Телепорт в ворота",
    Callback = function()
-       local goal = getMyGoalCached() or findGoal()
+       local goal = getMyGoalCached() or findMyGoal()
        local char = Players.LocalPlayer.Character
        if goal and char and char:FindFirstChild("HumanoidRootPart") then
            char.HumanoidRootPart.CFrame = goal.CFrame * CFrame.new(0, 3, 5)
