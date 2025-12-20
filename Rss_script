@@ -45,14 +45,14 @@ local goalkeeperZone = nil
 -- Кэши и таймеры
 local cachedBall = nil
 local lastBallSearch = 0
-local ballSearchInterval = 0.3 -- секунд (уменьшено для более частого поиска)
+local ballSearchInterval = 0.2 -- секунд (более частый поиск для быстрого обнаружения)
 
 local cachedGoal = nil
 local lastGoalCheck = 0
 local goalCheckInterval = 0.5 -- секунд (уменьшено для более частой проверки)
 
 local lastUpdate = 0
-local logicInterval = 0.1 -- ~10 логик/сек (увеличено для уменьшения лагов)
+local logicInterval = 0.08 -- ~12 логик/сек (баланс между производительностью и отзывчивостью)
 
 local lastRadiusUpdate = 0
 local radiusUpdateInterval = 0.12
@@ -164,12 +164,22 @@ end
 local function getBallCached(forceSearch)
     -- проверяем кеш (если не принудительный поиск)
     if not forceSearch and cachedBall and cachedBall.Parent and cachedBall:IsA("BasePart") then
-        -- Проверяем, что мяч все еще валиден
+        -- Проверяем, что мяч все еще валиден и НЕ в лобби
         local full = cachedBall:GetFullName()
         if not full:find("Lobby") and not full:find("SoccerBalls") then
-            return cachedBall
+            -- Дополнительная проверка - мяч не должен быть слишком далеко от игрока
+            local player = Players.LocalPlayer
+            local char = player and player.Character
+            if char and char:FindFirstChild("HumanoidRootPart") then
+                local dist = (cachedBall.Position - char.HumanoidRootPart.Position).Magnitude
+                if dist < 2000 then -- если мяч в разумных пределах, возвращаем кеш
+                    return cachedBall
+                end
+            else
+                return cachedBall
+            end
         else
-            -- Кеш устарел, очищаем
+            -- Кеш устарел (мяч из лобби), очищаем
             cachedBall = nil
         end
     end
@@ -188,7 +198,7 @@ local function getBallCached(forceSearch)
     -- Функция для проверки, что мяч НЕ в лобби
     local function isNotLobbyBall(v)
         local full = v:GetFullName()
-        -- Строгая проверка на лобби
+        -- Строгая проверка на лобби в пути
         if full:find("Lobby") or full:find("SoccerBalls") then
             return false
         end
@@ -202,19 +212,40 @@ local function getBallCached(forceSearch)
             parent = parent.Parent
             depth = depth + 1
         end
+        -- Проверяем, что мяч на разумной высоте (не слишком низко и не слишком высоко - это может быть лобби)
+        local ballY = v.Position.Y
+        if ballY < -100 or ballY > 500 then
+            return false
+        end
         return true
     end
     
-    -- Сначала ищем ближайший мяч к игроку (если есть позиция)
-    if playerPos then
+    -- Попытка 1: Ищем через AwayPosition/HomePosition (если они есть)
+    local awayPos = workspace:FindFirstChild("AwayPosition")
+    local homePos = workspace:FindFirstChild("HomePosition")
+    if (awayPos or homePos) and playerPos then
+        local searchRadius = 1000 -- большой радиус поиска
+        for _, v in ipairs(workspace:GetDescendants()) do
+            if v:IsA("BasePart") and v.Name == "SoccerBall" and isNotLobbyBall(v) then
+                local dist = (v.Position - playerPos).Magnitude
+                if dist < searchRadius then
+                    found = v
+                    break
+                end
+            end
+        end
+    end
+    
+    -- Попытка 2: Ищем ближайший мяч к игроку (если есть позиция и не нашли в попытке 1)
+    if not found and playerPos then
         local closestBall = nil
         local closestDist = math.huge
         
         for _, v in ipairs(workspace:GetDescendants()) do
             if v:IsA("BasePart") and v.Name == "SoccerBall" and isNotLobbyBall(v) then
                 local dist = (v.Position - playerPos).Magnitude
-                -- Предпочитаем мячи, которые ближе к игроку и не слишком далеко (в пределах 500 studs)
-                if dist < closestDist and dist < 500 then
+                -- Убрали ограничение 500 studs - ищем любые мячи
+                if dist < closestDist then
                     closestDist = dist
                     closestBall = v
                 end
@@ -226,9 +257,8 @@ local function getBallCached(forceSearch)
         end
     end
     
-    -- Если не нашли по близости, ищем любой валидный мяч (но НЕ из лобби)
+    -- Попытка 3: Ищем движущиеся мячи (если не нашли)
     if not found then
-        -- Сначала ищем движущиеся мячи
         for _, v in ipairs(workspace:GetDescendants()) do
             if v:IsA("BasePart") and v.Name == "SoccerBall" and isNotLobbyBall(v) then
                 if v.AssemblyLinearVelocity and v.AssemblyLinearVelocity.Magnitude > 0.1 then
@@ -237,13 +267,14 @@ local function getBallCached(forceSearch)
                 end
             end
         end
-        -- Если не нашли движущиеся, берем первый не-лобби мяч
-        if not found then
-            for _, v in ipairs(workspace:GetDescendants()) do
-                if v:IsA("BasePart") and v.Name == "SoccerBall" and isNotLobbyBall(v) then
-                    found = v
-                    break
-                end
+    end
+    
+    -- Попытка 4: Берем любой не-лобби мяч на разумной высоте (последняя попытка)
+    if not found then
+        for _, v in ipairs(workspace:GetDescendants()) do
+            if v:IsA("BasePart") and v.Name == "SoccerBall" and isNotLobbyBall(v) then
+                found = v
+                break
             end
         end
     end
@@ -399,6 +430,7 @@ local function startMagnet()
                     ball = getBallCached(true)
                 end
                 
+                -- Авто-голкипер работает даже если мяч не найден - используем позицию ворот как точку ожидания
                 if ball and not ball:GetFullName():find("Lobby") then
                     -- Вычисляем направление к воротам
                     local toGoal = (myGoal.Position - ball.Position)
@@ -465,11 +497,13 @@ local function startMagnet()
                             end
                         end
                     end
-                else
-                    -- Мяч не найден - выводим предупреждение редко
-                    if math.random(1, 100) == 1 then
-                        -- Тихий дебаг (можно закомментировать)
-                        -- print("[RSS] Мяч не найден для авто-сейва")
+                elseif Settings.AutoSave and myGoal then
+                    -- Мяч не найден - но голкипер все равно должен стоять у ворот
+                    -- Плавно двигаемся к позиции ворот
+                    local distToGoal = (myGoal.Position - hrp.Position).Magnitude
+                    if distToGoal > 5 then
+                        local goalCFrame = myGoal.CFrame * CFrame.new(0, 2, 3)
+                        hrp.CFrame = hrp.CFrame:Lerp(goalCFrame, 0.15)
                     end
                 end
             end
@@ -872,4 +906,3 @@ pcall(function()
 end)
 
 print("[RSS] Скрипт полностью загружен и работает.")
-
