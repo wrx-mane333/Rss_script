@@ -13,7 +13,7 @@ local TabGK = Window:CreateTab("🥅 Вратарь", 4483362458)
 -- Настройки
 local Settings = {
     HitboxEnabled = false,
-    VisualizerEnabled = false,  -- NEW: Visualizer setting
+    VisualizerEnabled = true,
     HitboxRadius = 8,
     HitboxStrength = 80,
     HitboxUseBodyVelocity = true,
@@ -35,113 +35,45 @@ local activeBV = {}
 local perBallLast = {}
 local connection = nil
 
+-- Функция для поиска мяча
+local function isBall(part)
+    local name = part.Name:lower()
+    return name:find("ball") or name:find("soccer") or name:find("balloon")
+end
+
+-- Функция для получения скорости мяча
+local function getBallVelocity(ball)
+    local success, velocity = pcall(function()
+        return ball.AssemblyLinearVelocity
+    end)
+    return success and velocity or Vector3.new(0, 0, 0)
+end
+
 local function createHitbox()
-    if hitboxPart then hitboxPart:Destroy() end
+    if hitboxPart then 
+        hitboxPart:Destroy() 
+        hitboxPart = nil
+    end
+    
     hitboxPart = Instance.new("Part")
     hitboxPart.Name = "RSS_Hitbox"
     hitboxPart.Anchored = true
     hitboxPart.CanCollide = false
-    -- Transparency зависит от настройки Visualizer
     hitboxPart.Transparency = Settings.VisualizerEnabled and 0.5 or 1
-    hitboxPart.Color = Color3.fromRGB(255, 0, 0) -- Красный цвет для видимости
-    hitboxPart.Size = Vector3.new(Settings.HitboxRadius*2, Settings.HitboxRadius*2, Settings.HitboxRadius*2)
+    hitboxPart.Color = Color3.fromRGB(255, 0, 0)
+    hitboxPart.Size = Vector3.new(Settings.HitboxRadius * 2, Settings.HitboxRadius * 2, Settings.HitboxRadius * 2)
     hitboxPart.Shape = Enum.PartType.Ball
-    hitboxPart.Material = Enum.Material.ForceField -- Красивый материал
+    hitboxPart.Material = Enum.Material.Neon
     hitboxPart.Parent = workspace
-
-    hitboxPart.Touched:Connect(function(part)
-        if not part or not part:IsA("BasePart") then return end
-        local name = part.Name:lower()
-        if not (name:find("ball") or name:find("soccer")) then return end
-
-        local now = tick()
-        local last = perBallLast[part]
-        if last and now - last < Settings.PerBallCooldown then return end
-        perBallLast[part] = now
-
-        local ok, vel = pcall(function() return part.AssemblyLinearVelocity end)
-        if not ok then vel = Vector3.new(0,0,0) end
-
-        -- GK Logic
-        if Settings.GKMode then
-            local function findMyGoal()
-                local char = LocalPlayer.Character
-                if not char or not char:FindFirstChild("HumanoidRootPart") then return nil end
-                local hrp = char.HumanoidRootPart
-                
-                -- Optimization: Cache goals or better search
-                local closest, dist = nil, math.huge
-                for _, v in pairs(workspace:GetDescendants()) do
-                    if v.Name == "GoalieCenter" and v:IsA("BasePart") then
-                        local d = (hrp.Position - v.Position).Magnitude
-                        if d < dist then dist = d; closest = v end
-                    end
-                end
-                return closest, dist
-            end
-
-            local myGoal, distToGoal = findMyGoal()
-            if myGoal then
-                local dirToGoal = (myGoal.Position - part.Position)
-                if dirToGoal.Magnitude > 0.001 and vel.Magnitude > 0.1 then
-                    local ballDir = vel.Unit
-                    local dirUnit = dirToGoal.Unit
-                    local dot = dirUnit:Dot(ballDir)
-                    
-                    local char = LocalPlayer.Character
-                    local hrp = char and char:FindFirstChild("HumanoidRootPart")
-                    local distPlayerToGoal = hrp and (hrp.Position - myGoal.Position).Magnitude or math.huge
-
-                    if vel.Magnitude >= Settings.GK_MinBallSpeed and dot >= Settings.GK_DotThreshold and distPlayerToGoal > Settings.GK_MaxDistanceToAttempt then
-                        local saveDir = (part.Position - myGoal.Position).Unit
-                        saveDir = Vector3.new(saveDir.X, 0.35, saveDir.Z).Unit
-                        
-                        pcall(function()
-                            part.AssemblyLinearVelocity = saveDir * Settings.GK_SaveSpeed
-                        end)
-                        
-                        if activeBV[part] then
-                            pcall(function() activeBV[part]:Destroy() end)
-                            activeBV[part] = nil
-                        end
-                        
-                        Rayfield:Notify({Title="🥅 GK Save", Content="Ball deflected!", Duration=1})
-                        return
-                    end
-                end
-            end
-        end
-
-        -- Magnet Logic
-        local char = LocalPlayer.Character
-        if not char or not char:FindFirstChild("HumanoidRootPart") then return end
-        local hrp = char.HumanoidRootPart
-        local targetPos = hrp.Position + Vector3.new(0, 1.5, 0)
-
-        local dir = (targetPos - part.Position)
-        if dir.Magnitude < 0.1 then return end
-        local dirUnit = dir.Unit
-        
-        if Settings.HitboxUseBodyVelocity then
-            if not part:FindFirstChild("RSS_HitBV") then
-                local bv = Instance.new("BodyVelocity")
-                bv.Name = "RSS_HitBV"
-                bv.MaxForce = Vector3.new(1e5, 1e5, 1e5)
-                bv.Velocity = dirUnit * Settings.HitboxStrength
-                bv.Parent = part
-                activeBV[part] = bv
-                delay(0.25, function()
-                    if bv and bv.Parent then pcall(function() bv:Destroy() end) end
-                    activeBV[part] = nil
-                end)
-            else
-                local bv = part:FindFirstChild("RSS_HitBV")
-                if bv then pcall(function() bv.Velocity = dirUnit * Settings.HitboxStrength end) end
-            end
-        else
-            pcall(function() part.AssemblyLinearVelocity = dirUnit * Settings.HitboxStrength end)
-        end
-    end)
+    
+    -- Создаём Attachment для ForceField эффекта
+    local attachment = Instance.new("Attachment")
+    attachment.Parent = hitboxPart
+    
+    -- Добавляем ForceField эффект
+    local forceField = Instance.new("ForceField")
+    forceField.Visible = Settings.VisualizerEnabled
+    forceField.Parent = hitboxPart
 end
 
 local function destroyHitbox()
@@ -151,25 +83,169 @@ local function destroyHitbox()
     end
 end
 
-local function startUpdater()
-    if connection then connection:Disconnect() end
-    connection = RunService.Heartbeat:Connect(function()
-        if not Settings.HitboxEnabled then return end
-        if not hitboxPart then createHitbox() end
-        
-        local char = LocalPlayer.Character
-        if char and char:FindFirstChild("HumanoidRootPart") then
-            hitboxPart.Position = char.HumanoidRootPart.Position
-            hitboxPart.Size = Vector3.new(Settings.HitboxRadius*2, Settings.HitboxRadius*2, Settings.HitboxRadius*2)
-            -- Обновляем прозрачность на лету
-            hitboxPart.Transparency = Settings.VisualizerEnabled and 0.5 or 1
+local function checkAndAffectBalls()
+    if not Settings.HitboxEnabled or not LocalPlayer.Character then return end
+    
+    local character = LocalPlayer.Character
+    local humanoidRootPart = character:FindFirstChild("HumanoidRootPart")
+    if not humanoidRootPart then return end
+    
+    local hitboxPosition = humanoidRootPart.Position
+    local now = tick()
+    
+    -- Проверяем все части в радиусе
+    for _, part in pairs(workspace:GetPartsInPart(hitboxPart)) do
+        if part and part:IsA("BasePart") and isBall(part) then
+            -- Проверяем кулдаун
+            local lastHit = perBallLast[part]
+            if lastHit and (now - lastHit) < Settings.PerBallCooldown then
+                continue
+            end
+            
+            perBallLast[part] = now
+            
+            -- GK логика
+            if Settings.GKMode then
+                local function findMyGoal()
+                    for _, obj in pairs(workspace:GetChildren()) do
+                        if obj.Name == "Goal" or obj.Name:find("Goal") then
+                            for _, part in pairs(obj:GetDescendants()) do
+                                if part:IsA("BasePart") and part.Name == "GoalieCenter" then
+                                    return part
+                                end
+                            end
+                        end
+                    end
+                    return nil
+                end
+                
+                local myGoal = findMyGoal()
+                if myGoal then
+                    local ballVel = getBallVelocity(part)
+                    local toGoal = (myGoal.Position - part.Position)
+                    
+                    if toGoal.Magnitude > 0 and ballVel.Magnitude > Settings.GK_MinBallSpeed then
+                        local ballDir = ballVel.Unit
+                        local goalDir = toGoal.Unit
+                        local dot = ballDir:Dot(goalDir)
+                        
+                        local distToGoal = (humanoidRootPart.Position - myGoal.Position).Magnitude
+                        
+                        if dot >= Settings.GK_DotThreshold and distToGoal < Settings.GK_MaxDistanceToAttempt then
+                            local saveDir = (part.Position - myGoal.Position).Unit
+                            saveDir = Vector3.new(saveDir.X, 0.35, saveDir.Z).Unit
+                            
+                            pcall(function()
+                                part.AssemblyLinearVelocity = saveDir * Settings.GK_SaveSpeed
+                            end)
+                            
+                            if activeBV[part] then
+                                pcall(function() activeBV[part]:Destroy() end)
+                                activeBV[part] = nil
+                            end
+                            
+                            Rayfield:Notify({
+                                Title = "🥅 GK Save", 
+                                Content = "Ball deflected!", 
+                                Duration = 1
+                            })
+                            continue
+                        end
+                    end
+                end
+            end
+            
+            -- Magnet логика
+            local targetPos = humanoidRootPart.Position + Vector3.new(0, 1.5, 0)
+            local dir = (targetPos - part.Position)
+            
+            if dir.Magnitude > 0.1 then
+                local dirUnit = dir.Unit
+                
+                if Settings.HitboxUseBodyVelocity then
+                    local existingBV = part:FindFirstChild("RSS_HitBV")
+                    if not existingBV then
+                        local bv = Instance.new("BodyVelocity")
+                        bv.Name = "RSS_HitBV"
+                        bv.MaxForce = Vector3.new(400000, 400000, 400000)
+                        bv.Velocity = dirUnit * Settings.HitboxStrength
+                        bv.Parent = part
+                        activeBV[part] = bv
+                        
+                        delay(0.25, function()
+                            if bv and bv.Parent then
+                                pcall(function() bv:Destroy() end)
+                            end
+                            activeBV[part] = nil
+                        end)
+                    else
+                        pcall(function()
+                            existingBV.Velocity = dirUnit * Settings.HitboxStrength
+                        end)
+                    end
+                else
+                    pcall(function()
+                        part.AssemblyLinearVelocity = dirUnit * Settings.HitboxStrength
+                    end)
+                end
+            end
         end
+    end
+end
+
+local function startUpdater()
+    if connection then 
+        connection:Disconnect() 
+        connection = nil
+    end
+    
+    createHitbox()
+    
+    connection = RunService.Heartbeat:Connect(function()
+        if not Settings.HitboxEnabled or not LocalPlayer.Character then 
+            if hitboxPart then
+                hitboxPart.Transparency = 1
+            end
+            return 
+        end
+        
+        local character = LocalPlayer.Character
+        local humanoidRootPart = character:FindFirstChild("HumanoidRootPart")
+        if not humanoidRootPart then return end
+        
+        -- Обновляем позицию и видимость хитбокса
+        if hitboxPart then
+            hitboxPart.Position = humanoidRootPart.Position
+            hitboxPart.Size = Vector3.new(Settings.HitboxRadius * 2, Settings.HitboxRadius * 2, Settings.HitboxRadius * 2)
+            hitboxPart.Transparency = Settings.VisualizerEnabled and 0.5 or 1
+            
+            -- Обновляем ForceField видимость
+            local forceField = hitboxPart:FindFirstChild("ForceField")
+            if forceField then
+                forceField.Visible = Settings.VisualizerEnabled
+            end
+        end
+        
+        -- Проверяем и воздействуем на мячи
+        checkAndAffectBalls()
     end)
 end
 
 local function stopUpdater()
-    if connection then connection:Disconnect() connection = nil end
+    if connection then 
+        connection:Disconnect() 
+        connection = nil
+    end
     destroyHitbox()
+    
+    -- Очищаем все BodyVelocity
+    for ball, bv in pairs(activeBV) do
+        if bv and bv.Parent then
+            pcall(function() bv:Destroy() end)
+        end
+    end
+    activeBV = {}
+    perBallLast = {}
 end
 
 -- UI Elements
@@ -179,24 +255,34 @@ Tab:CreateToggle({
     Callback = function(val)
         Settings.HitboxEnabled = val
         if val then
-            createHitbox()
             startUpdater()
-            Rayfield:Notify({Title="Hitbox", Content="Enabled", Duration=1})
+            Rayfield:Notify({
+                Title = "Hitbox", 
+                Content = "Enabled", 
+                Duration = 1
+            })
         else
             stopUpdater()
-            Rayfield:Notify({Title="Hitbox", Content="Disabled", Duration=1})
+            Rayfield:Notify({
+                Title = "Hitbox", 
+                Content = "Disabled", 
+                Duration = 1
+            })
         end
     end
 })
 
--- NEW: Visualizer Toggle
 Tab:CreateToggle({
     Name = "👁️ Показать Хитбокс (Visualizer)",
-    CurrentValue = false,
+    CurrentValue = true,
     Callback = function(val)
         Settings.VisualizerEnabled = val
         if hitboxPart then
             hitboxPart.Transparency = val and 0.5 or 1
+            local forceField = hitboxPart:FindFirstChild("ForceField")
+            if forceField then
+                forceField.Visible = val
+            end
         end
     end
 })
@@ -208,7 +294,9 @@ Tab:CreateSlider({
     CurrentValue = Settings.HitboxRadius,
     Callback = function(v)
         Settings.HitboxRadius = v
-        if hitboxPart then hitboxPart.Size = Vector3.new(v*2, v*2, v*2) end
+        if hitboxPart then 
+            hitboxPart.Size = Vector3.new(v * 2, v * 2, v * 2) 
+        end
     end
 })
 
@@ -217,21 +305,64 @@ Tab:CreateSlider({
     Range = {20, 200},
     Increment = 5,
     CurrentValue = Settings.HitboxStrength,
-    Callback = function(v) Settings.HitboxStrength = v end
+    Callback = function(v) 
+        Settings.HitboxStrength = v 
+    end
+})
+
+Tab:CreateToggle({
+    Name = "Использовать BodyVelocity",
+    CurrentValue = Settings.HitboxUseBodyVelocity,
+    Callback = function(v) 
+        Settings.HitboxUseBodyVelocity = v 
+    end
+})
+
+Tab:CreateSlider({
+    Name = "🕒 Кулдаун на мяч",
+    Range = {0.1, 2},
+    Increment = 0.05,
+    CurrentValue = Settings.PerBallCooldown,
+    Callback = function(v) 
+        Settings.PerBallCooldown = v 
+    end
 })
 
 TabGK:CreateToggle({
     Name = "🥅 Режим вратаря (GK)",
     CurrentValue = Settings.GKMode,
-    Callback = function(v) Settings.GKMode = v end
+    Callback = function(v) 
+        Settings.GKMode = v 
+    end
+})
+
+TabGK:CreateSlider({
+    Name = "💨 Скорость сейва",
+    Range = {50, 250},
+    Increment = 5,
+    CurrentValue = Settings.GK_SaveSpeed,
+    Callback = function(v) 
+        Settings.GK_SaveSpeed = v 
+    end
+})
+
+TabGK:CreateSlider({
+    Name = "📏 Макс. дистанция для сейва",
+    Range = {5, 50},
+    Increment = 1,
+    CurrentValue = Settings.GK_MaxDistanceToAttempt,
+    Callback = function(v) 
+        Settings.GK_MaxDistanceToAttempt = v 
+    end
 })
 
 -- Cleanup
 game:BindToClose(function()
     stopUpdater()
-    for _, bv in pairs(activeBV) do
-        pcall(function() bv:Destroy() end)
-    end
 end)
 
-Rayfield:Notify({Title="Script Loaded", Content="Enhanced by Replit Agent", Duration=3})
+Rayfield:Notify({
+    Title = "Script Loaded", 
+    Content = "Enhanced by Replit Agent", 
+    Duration = 3
+})
