@@ -1,4 +1,4 @@
--- ⚽ Hitbox Control (Simple & Clean)
+-- ⚽ Hitbox Control (Fixed & Optimized)
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
@@ -8,24 +8,37 @@ local lp = Players.LocalPlayer
 -- ========= SETTINGS =========
 local Settings = {
     Enabled = false,
-    Power = 80,
-    Cooldown = 0.25,
+    Power = 85,
+    Cooldown = 0.2, -- Немного уменьшил задержку для плавности
     HitboxSize = 12,
     MaxHitboxSize = 35
 }
 
 local lastKick = 0
 
--- ========= BALL =========
+-- ========= BALL FINDER =========
+-- Улучшенный поиск мяча: ищет детали с именем Ball или TouchBall
 local function getBall()
-    return workspace:FindFirstChild("ball") or workspace:FindFirstChild("TouchBall")
+    for _, obj in ipairs(workspace:GetChildren()) do
+        if obj:IsA("BasePart") and (obj.Name:lower():find("ball")) then
+            return obj
+        end
+    end
+    return nil
 end
 
--- ========= HITBOX =========
+-- ========= HITBOX SPHERE =========
+-- Удаляем старую сферу, если она осталась от прошлого запуска
+if workspace:FindFirstChild("HitboxSphere_System") then
+    workspace.HitboxSphere_System:Destroy()
+end
+
 local sphere = Instance.new("Part")
+sphere.Name = "HitboxSphere_System"
 sphere.Shape = Enum.PartType.Ball
 sphere.Anchored = true
 sphere.CanCollide = false
+sphere.CastShadow = false
 sphere.Material = Enum.Material.ForceField
 sphere.Color = Color3.fromRGB(0, 255, 120)
 sphere.Transparency = 1
@@ -33,10 +46,8 @@ sphere.Parent = workspace
 
 local function updateSphere()
     sphere.Size = Vector3.new(Settings.HitboxSize, Settings.HitboxSize, Settings.HitboxSize)
-    sphere.Transparency = Settings.Enabled and 0.4 or 1
+    sphere.Transparency = Settings.Enabled and 0.5 or 1
 end
-
-updateSphere()
 
 -- ========= HIT LOGIC =========
 RunService.Heartbeat:Connect(function()
@@ -46,131 +57,128 @@ RunService.Heartbeat:Connect(function()
     local root = char and char:FindFirstChild("HumanoidRootPart")
     if not root then return end
 
-    sphere.CFrame = root.CFrame * CFrame.new(0, 0, -3)
+    -- Сфера летит чуть впереди игрока
+    sphere.CFrame = root.CFrame * CFrame.new(0, 0, -2)
 
     local ball = getBall()
-    if not ball or not ball:IsA("BasePart") then return end
+    if not ball then return end
     if tick() - lastKick < Settings.Cooldown then return end
 
-    if (ball.Position - sphere.Position).Magnitude <= (Settings.HitboxSize / 2) then
+    -- Дистанция до мяча
+    local dist = (ball.Position - sphere.Position).Magnitude
+    if dist <= (Settings.HitboxSize / 2) then
         lastKick = tick()
-        local dir = (ball.Position - root.Position + Vector3.new(0,1,0)).Unit
-        ball.AssemblyLinearVelocity = dir * Settings.Power + Vector3.new(0,18,0)
+        
+        -- Направление удара (вперед от игрока + немного вверх)
+        local dir = (ball.Position - root.Position).Unit
+        ball.AssemblyLinearVelocity = (dir * Settings.Power) + Vector3.new(0, Settings.Power / 4, 0)
     end
 end)
 
--- ========= UI =========
-local gui = Instance.new("ScreenGui", game.CoreGui)
+-- ========= UI SETUP =========
+local gui = Instance.new("ScreenGui")
 gui.Name = "SimpleHitboxUI"
+-- Пробуем вставить в CoreGui (для читов), если не выйдет - в PlayerGui
+local success, err = pcall(function() gui.Parent = game:GetService("CoreGui") end)
+if not success then gui.Parent = lp:WaitForChild("PlayerGui") end
 
--- Toggle Button
+-- Главная кнопка-переключатель
 local toggleBtn = Instance.new("TextButton", gui)
 toggleBtn.Size = UDim2.fromOffset(50, 50)
-toggleBtn.Position = UDim2.fromOffset(10, 10)
+toggleBtn.Position = UDim2.fromOffset(20, 150)
 toggleBtn.BackgroundColor3 = Color3.fromRGB(40, 40, 50)
 toggleBtn.Text = "⚽"
-toggleBtn.Font = Enum.Font.GothamBold
-toggleBtn.TextSize = 24
+toggleBtn.TextSize = 25
 toggleBtn.TextColor3 = Color3.new(1, 1, 1)
-toggleBtn.AutoButtonColor = false
 
 local btnCorner = Instance.new("UICorner", toggleBtn)
 btnCorner.CornerRadius = UDim.new(1, 0)
 
--- Mini Menu
+-- Меню
 local menu = Instance.new("Frame", gui)
-menu.Size = UDim2.fromOffset(180, 150)
-menu.Position = UDim2.fromOffset(70, 10)
+menu.Size = UDim2.fromOffset(180, 160)
+menu.Position = UDim2.new(0, 80, 0, 150)
 menu.BackgroundColor3 = Color3.fromRGB(30, 30, 40)
 menu.Visible = false
 
 local menuCorner = Instance.new("UICorner", menu)
-menuCorner.CornerRadius = UDim.new(0, 8)
+menuCorner.CornerRadius = UDim.new(0, 10)
 
--- Title
+-- Заголовок
 local title = Instance.new("TextLabel", menu)
-title.Size = UDim2.new(1, 0, 0, 30)
+title.Size = UDim2.new(1, 0, 0, 35)
 title.BackgroundTransparency = 1
-title.Text = "HITBOX"
+title.Text = "HITBOX MENU"
 title.Font = Enum.Font.GothamBold
-title.TextSize = 16
 title.TextColor3 = Color3.new(1, 1, 1)
 
--- Status Button
+-- Кнопка Вкл/Выкл
 local statusBtn = Instance.new("TextButton", menu)
-statusBtn.Size = UDim2.fromOffset(140, 35)
-statusBtn.Position = UDim2.fromOffset(20, 40)
+statusBtn.Size = UDim2.new(0.8, 0, 0, 35)
+statusBtn.Position = UDim2.new(0.1, 0, 0, 45)
 statusBtn.Font = Enum.Font.GothamBold
 statusBtn.TextSize = 14
 statusBtn.TextColor3 = Color3.new(1, 1, 1)
-statusBtn.AutoButtonColor = false
 
 local statusCorner = Instance.new("UICorner", statusBtn)
-statusCorner.CornerRadius = UDim.new(0, 6)
 
--- Size Slider
+-- Слайдер размера
 local sizeText = Instance.new("TextLabel", menu)
-sizeText.Position = UDim2.fromOffset(20, 85)
-sizeText.Size = UDim2.fromOffset(140, 20)
+sizeText.Size = UDim2.new(1, 0, 0, 20)
+sizeText.Position = UDim2.new(0, 0, 0, 90)
 sizeText.BackgroundTransparency = 1
-sizeText.Text = "Size: " .. Settings.HitboxSize
-sizeText.Font = Enum.Font.Gotham
-sizeText.TextSize = 14
 sizeText.TextColor3 = Color3.new(1, 1, 1)
+sizeText.Font = Enum.Font.Gotham
 
 local sliderBg = Instance.new("Frame", menu)
-sliderBg.Position = UDim2.fromOffset(20, 110)
-sliderBg.Size = UDim2.fromOffset(140, 6)
+sliderBg.Size = UDim2.new(0.8, 0, 0, 8)
+sliderBg.Position = UDim2.new(0.1, 0, 0, 120)
 sliderBg.BackgroundColor3 = Color3.fromRGB(60, 60, 70)
 
-local sliderCorner = Instance.new("UICorner", sliderBg)
-sliderCorner.CornerRadius = UDim.new(1, 0)
-
 local sliderFill = Instance.new("Frame", sliderBg)
+sliderFill.Size = UDim2.new(0.5, 0, 1, 0)
 sliderFill.BackgroundColor3 = Color3.fromRGB(0, 255, 150)
-sliderFill.Size = UDim2.new(Settings.HitboxSize / Settings.MaxHitboxSize, 0, 1, 0)
 
-local fillCorner = Instance.new("UICorner", sliderFill)
-fillCorner.CornerRadius = UDim.new(1, 0)
-
--- Close Button
-local closeBtn = Instance.new("TextButton", menu)
-closeBtn.Size = UDim2.fromOffset(20, 20)
-closeBtn.Position = UDim2.fromOffset(150, 5)
-closeBtn.BackgroundTransparency = 1
-closeBtn.Text = "×"
-closeBtn.Font = Enum.Font.GothamBold
-closeBtn.TextSize = 20
-closeBtn.TextColor3 = Color3.new(1, 1, 1)
-closeBtn.AutoButtonColor = false
-
--- ========= UI FUNCTIONS =========
+-- ========= FUNCTIONS =========
 local function updateUI()
     if Settings.Enabled then
-        statusBtn.Text = "ON"
-        statusBtn.BackgroundColor3 = Color3.fromRGB(0, 200, 100)
-        toggleBtn.BackgroundColor3 = Color3.fromRGB(0, 180, 90)
+        statusBtn.Text = "STATUS: ON"
+        statusBtn.BackgroundColor3 = Color3.fromRGB(0, 180, 100)
     else
-        statusBtn.Text = "OFF"
-        statusBtn.BackgroundColor3 = Color3.fromRGB(200, 60, 60)
-        toggleBtn.BackgroundColor3 = Color3.fromRGB(40, 40, 50)
+        statusBtn.Text = "STATUS: OFF"
+        statusBtn.BackgroundColor3 = Color3.fromRGB(180, 50, 50)
     end
-    
-    sizeText.Text = "Size: " .. Settings.HitboxSize
+    sizeText.Text = "Hitbox Size: " .. Settings.HitboxSize
     sliderFill.Size = UDim2.new(Settings.HitboxSize / Settings.MaxHitboxSize, 0, 1, 0)
-    
     updateSphere()
 end
 
--- ========= EVENTS =========
-toggleBtn.MouseButton1Click:Connect(function()
-    menu.Visible = not menu.Visible
-    toggleBtn.Text = menu.Visible and "▲" or "⚽"
+-- Логика слайдера (Исправлено)
+local isDragging = false
+local function updateSlider(input)
+    local relativeX = math.clamp((input.Position.X - sliderBg.AbsolutePosition.X) / sliderBg.AbsoluteSize.X, 0, 1)
+    Settings.HitboxSize = math.floor(relativeX * Settings.MaxHitboxSize)
+    if Settings.HitboxSize < 2 then Settings.HitboxSize = 2 end
+    updateUI()
+end
+
+sliderBg.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        isDragging = true
+        updateSlider(input)
+    end
 end)
 
-closeBtn.MouseButton1Click:Connect(function()
-    menu.Visible = false
-    toggleBtn.Text = "⚽"
+UserInputService.InputChanged:Connect(function(input)
+    if isDragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+        updateSlider(input)
+    end
+end)
+
+UserInputService.InputEnded:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        isDragging = false
+    end
 end)
 
 statusBtn.MouseButton1Click:Connect(function()
@@ -178,47 +186,10 @@ statusBtn.MouseButton1Click:Connect(function()
     updateUI()
 end)
 
--- FIXED MOBILE SLIDER (только добавил Touch поддержку)
-local dragging = false
-sliderBg.InputBegan:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-        dragging = true
-        local mouse = lp:GetMouse()
-        repeat
-            local scale = math.clamp(
-                (mouse.X - sliderBg.AbsolutePosition.X) / sliderBg.AbsoluteSize.X,
-                0, 1
-            )
-            Settings.HitboxSize = math.floor(scale * Settings.MaxHitboxSize)
-            updateUI()
-            task.wait()
-        until not (mouse.Button1Down or UserInputService:IsMouseButtonPressed(Enum.UserInputType.Touch))
-        dragging = false
-    end
+toggleBtn.MouseButton1Click:Connect(function()
+    menu.Visible = not menu.Visible
 end)
 
--- Initial update
+-- Начальный запуск
 updateUI()
-
--- Mobile support
-local isMobile = UserInputService.TouchEnabled
-if isMobile then
-    toggleBtn.Size = UDim2.fromOffset(60, 60)
-    toggleBtn.TextSize = 28
-    toggleBtn.Position = UDim2.fromOffset(15, 15)
-    
-    menu.Size = UDim2.fromOffset(200, 170)
-    menu.Position = UDim2.fromOffset(85, 15)
-    
-    statusBtn.Size = UDim2.fromOffset(160, 40)
-    statusBtn.TextSize = 16
-    
-    sizeText.TextSize = 16
-    sliderBg.Size = UDim2.fromOffset(160, 8)
-    sliderBg.Position = UDim2.fromOffset(20, 115)
-    
-    closeBtn.Size = UDim2.fromOffset(25, 25)
-    closeBtn.TextSize = 22
-end
-
-print("✅ Hitbox Loaded - Toggle button at top-left - Mobile slider fixed!") 
+print("✅ Script Loaded! Ball search active.")
