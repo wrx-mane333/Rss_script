@@ -1,568 +1,233 @@
-local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
+-- ⚽ Realistic Street Soccer – GK Hitbox Hub (Delta X)
 
-local Window = Rayfield:CreateWindow({
-    Name = "RSS | Hitbox Magnet v2.0",
-    LoadingTitle = "Загрузка Hitbox Magnet...",
-    LoadingSubtitle = "Fixed Auto GK + Improved Visual",
-    ConfigurationSaving = { Enabled = false }
-})
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local lp = Players.LocalPlayer
 
-local Tab = Window:CreateTab("🧲 Хитбокс", 4483362458)
-local TabGK = Window:CreateTab("🥅 Вратарь", 4483362458)
-
--- Настройки
+-- ========= НАСТРОЙКИ =========
 local Settings = {
-    HitboxEnabled = false,
-    VisualizerEnabled = true,
-    VisualizerTransparency = 0.8,  -- Новая настройка прозрачности
-    HitboxRadius = 8,
-    HitboxStrength = 80,
-    HitboxUseBodyVelocity = true,
-    PerBallCooldown = 0.35,
-    GKMode = true,
-    AutoGK = true,  -- Авто вратарь
-    GK_SaveSpeed = 140,
-    GK_MinBallSpeed = 15,
-    GK_DotThreshold = 0.7,
-    GK_MaxDistanceToAttempt = 25,
-    GK_ReactionTime = 0.1
+    Enabled      = true,      -- сразу включён
+    RadiusMode   = "Front",   -- пока фронтальный щит
+    Power        = 110,       -- сила отражения
+    Cooldown     = 0.20,      -- задержка между сейвами
+    ShowRadius   = true,      -- показывать щит
+    RadiusColor  = Color3.fromRGB(0, 255, 0),
+    RadiusAlpha  = 0.6,       -- 0 = прозрачный, 1 = плотный
+    RadiusSize   = 14         -- ширина/высота зоны кипера
 }
 
-local RunService = game:GetService("RunService")
-local Players = game:GetService("Players")
-local LocalPlayer = Players.LocalPlayer
-local workspace = game:GetService("Workspace")
-local Debris = game:GetService("Debris")
+local lastKick = 0
 
-local hitboxPart = nil
-local activeBV = {}
-local perBallLast = {}
-local connection = nil
-local lastGKCheck = 0
-
--- Функция для поиска мяча
-local function isBall(part)
-    if not part then return false end
-    local name = part.Name:lower()
-    return name:find("ball") or name:find("soccer") or name:find("balloon") or 
-           name:find("puck") or (part.Size.Magnitude < 5 and part:GetAttribute("Ball") == true)
-end
-
--- Функция для поиска ворот
-local function findMyGoal()
-    local char = LocalPlayer.Character
-    if not char then return nil end
-    local hrp = char:FindFirstChild("HumanoidRootPart")
-    if not hrp then return nil end
-    
-    -- Ищем GoalCenter, GoalieCenter, GoalPost или любую часть связанную с воротами
-    local goalParts = {}
-    
-    -- Сначала ищем по названию
-    for _, obj in pairs(workspace:GetDescendants()) do
-        if obj:IsA("BasePart") then
-            local name = obj.Name:lower()
-            if name:find("goal") or name:find("post") or name:find("net") then
-                table.insert(goalParts, obj)
-            end
+-- ========= ПОИСК МЯЧА В ТВОЕЙ ИГРЕ =========
+local function getBall()
+    if workspace:FindFirstChild("ball") then
+        local root = workspace.ball
+        if root:FindFirstChild("Ball") and root.Ball:IsA("BasePart") then
+            return root.Ball
+        end
+        if root:FindFirstChild("TouchBall") and root.TouchBall:IsA("BasePart") then
+            return root.TouchBall
         end
     end
-    
-    -- Если нашли части ворот, выбираем ближайшую
-    if #goalParts > 0 then
-        local closest = nil
-        local minDist = math.huge
-        
-        for _, goal in pairs(goalParts) do
-            local dist = (hrp.Position - goal.Position).Magnitude
-            if dist < minDist then
-                minDist = dist
-                closest = goal
-            end
-        end
-        return closest
-    end
-    
-    -- Если не нашли, ищем модели Goal
-    for _, model in pairs(workspace:GetChildren()) do
-        if model:IsA("Model") and (model.Name:find("Goal") or model.Name:find("Goalie")) then
-            local primary = model:FindFirstChild("PrimaryPart") or model:FindFirstChildWhichIsA("BasePart")
-            if primary then
-                return primary
-            end
+    for _, obj in ipairs(workspace:GetDescendants()) do
+        if obj:IsA("BasePart") and obj.Name:lower() == "ball" then
+            return obj
         end
     end
-    
     return nil
 end
 
--- Функция для проверки угрозы воротам
-local function isBallThreateningGoal(ball, ballVel)
-    if not Settings.GKMode or not Settings.AutoGK then return false end
-    
-    local goal = findMyGoal()
-    if not goal then return false end
-    
-    -- Проверяем скорость мяча
-    local speed = ballVel.Magnitude
-    if speed < Settings.GK_MinBallSpeed then return false end
-    
-    -- Направление к воротам
-    local toGoal = (goal.Position - ball.Position)
-    if toGoal.Magnitude > 50 then return false end  -- Слишком далеко
-    
-    -- Направление движения мяча
-    local ballDir = ballVel.Unit
-    local goalDir = toGoal.Unit
-    
-    -- Угол между направлением мяча и направлением к воротам
-    local dot = ballDir:Dot(goalDir)
-    
-    -- Проверяем, летит ли мяч в сторону ворот
-    return dot > Settings.GK_DotThreshold
+-- ========= СОЗДАЁМ ЩИТ (СПЛЮСНУТЫЙ ХИТБОКС) =========
+local function createShield()
+    local p = Instance.new("Part")
+    p.Name = "GK_Shield"
+    p.Anchored = true
+    p.CanCollide = false
+    p.Massless = true
+    p.Color = Settings.RadiusColor
+    p.Material = Enum.Material.ForceField
+    p.Transparency = 1
+    p.Parent = workspace
+    return p
 end
 
--- Функция для выполнения сейва вратаря
-local function performGKSave(ball)
-    if not Settings.GKMode or not Settings.AutoGK then return end
-    
-    local goal = findMyGoal()
-    if not goal then return end
-    
-    local char = LocalPlayer.Character
-    if not char then return end
-    local hrp = char:FindFirstChild("HumanoidRootPart")
-    if not hrp then return end
-    
-    -- Проверяем расстояние до ворот
-    local distToGoal = (hrp.Position - goal.Position).Magnitude
-    if distToGoal > Settings.GK_MaxDistanceToAttempt then return end
-    
-    -- Направление для сейва (от ворот)
-    local saveDir = (ball.Position - goal.Position).Unit
-    saveDir = Vector3.new(saveDir.X, 0.35, saveDir.Z).Unit
-    
-    -- Применяем силу
-    pcall(function()
-        ball.AssemblyLinearVelocity = saveDir * Settings.GK_SaveSpeed
-    end)
-    
-    -- Визуальная обратная связь
-    Rayfield:Notify({
-        Title = "🥅 Авто-сейв!",
-        Content = "Мяч отбит!",
-        Duration = 1
-    })
-end
+local shield = createShield()
 
-local function createHitbox()
-    if hitboxPart then 
-        hitboxPart:Destroy() 
-        hitboxPart = nil
-    end
-    
-    hitboxPart = Instance.new("Part")
-    hitboxPart.Name = "RSS_Hitbox"
-    hitboxPart.Anchored = true
-    hitboxPart.CanCollide = false
-    hitboxPart.Transparency = Settings.VisualizerEnabled and Settings.VisualizerTransparency or 1
-    hitboxPart.Color = Color3.fromRGB(255, 100, 100)  -- Светло-красный цвет
-    hitboxPart.Size = Vector3.new(Settings.HitboxRadius * 2, Settings.HitboxRadius * 2, Settings.HitboxRadius * 2)
-    hitboxPart.Shape = Enum.PartType.Ball
-    hitboxPart.Material = Enum.Material.Neon
-    hitboxPart.Parent = workspace
-    
-    -- Добавляем свечение
-    local glow = Instance.new("SurfaceGui", hitboxPart)
-    glow.Face = Enum.NormalId.Front
-    glow.AlwaysOnTop = true
-    
-    local frame = Instance.new("Frame", glow)
-    frame.Size = UDim2.new(1, 0, 1, 0)
-    frame.BackgroundColor3 = Color3.fromRGB(255, 100, 100)
-    frame.BackgroundTransparency = 0.7
-    frame.BorderSizePixel = 0
-end
-
-local function destroyHitbox()
-    if hitboxPart then
-        hitboxPart:Destroy()
-        hitboxPart = nil
+local function updateShieldVisible()
+    if not shield then return end
+    if Settings.ShowRadius and Settings.Enabled then
+        shield.Transparency = 1 - Settings.RadiusAlpha
+    else
+        shield.Transparency = 1
     end
 end
 
-local function affectBall(ball)
-    if not ball or not ball:IsA("BasePart") then return end
-    
-    local now = tick()
-    
-    -- Проверяем кулдаун
-    if perBallLast[ball] and (now - perBallLast[ball]) < Settings.PerBallCooldown then
+-- ========= ОБНОВЛЯЕМ ПОЗИЦИЮ И РАЗМЕР ЩИТА =========
+local function updateShield()
+    local char = lp.Character
+    local root = char and char:FindFirstChild("HumanoidRootPart")
+    if not root or not shield then return end
+
+    local radius = Settings.RadiusSize          -- ширина по X
+    local thickness = 1.5                       -- толщина по Z
+    local height = radius * 1.2                 -- высота щита
+
+    local offset = CFrame.new(0, 0, -2)         -- щит чуть перед кипером
+
+    local size = Vector3.new(radius * 2, height, thickness)
+    if shield.Size ~= size then
+        shield.Size = size
+    end
+
+    shield.CFrame = root.CFrame * offset
+    updateShieldVisible()
+
+    return shield.CFrame, radius
+end
+
+-- ========= ЛОГИКА СЕЙВА: МЯЧ ОТЛЕТАЕТ ОТ ЩИТА =========
+RunService.Heartbeat:Connect(function()
+    if not Settings.Enabled then
+        updateShieldVisible()
         return
     end
-    
-    perBallLast[ball] = now
-    
-    -- Проверяем авто-сейв вратаря
-    if Settings.GKMode and Settings.AutoGK then
-        local ballVel = ball.AssemblyLinearVelocity
-        if isBallThreateningGoal(ball, ballVel) then
-            performGKSave(ball)
-            return
+
+    local cframe, radius = updateShield()
+    if not cframe or not radius then return end
+
+    local ball = getBall()
+    local char = lp.Character
+    local root = char and char:FindFirstChild("HumanoidRootPart")
+    if not (ball and root) then return end
+
+    local now = tick()
+    if now - lastKick < Settings.Cooldown then return end
+
+    -- Локальная позиция мяча относительно щита
+    local localPos = cframe:PointToObjectSpace(ball.Position)
+
+    local halfX = radius
+    local halfY = radius
+    local halfZ = shield.Size.Z / 2 + ball.Size.Z / 2
+
+    local inX = math.abs(localPos.X) <= halfX
+    local inY = math.abs(localPos.Y) <= halfY
+    local inZ = math.abs(localPos.Z) <= halfZ
+
+    if inX and inY and inZ then
+        lastKick = now
+
+        local v = ball.AssemblyLinearVelocity
+        local normal = cframe.LookVector
+
+        -- отражение скорости от щита
+        local dot = v:Dot(normal)
+        local reflected = v - 2 * dot * normal
+
+        -- немного вверх, чтобы не в землю
+        reflected = reflected + Vector3.new(0, 5, 0)
+
+        local targetPower = math.clamp(Settings.Power, 50, 140)
+        if reflected.Magnitude < targetPower then
+            reflected = reflected.Unit * targetPower
         end
-    end
-    
-    -- Обычная хитбокс логика
-    local char = LocalPlayer.Character
-    if not char then return end
-    
-    local hrp = char:FindFirstChild("HumanoidRootPart")
-    if not hrp then return end
-    
-    local targetPos = hrp.Position + Vector3.new(0, 1.5, 0)
-    local dir = (targetPos - ball.Position)
-    
-    if dir.Magnitude > 0.1 then
-        local dirUnit = dir.Unit
-        
-        if Settings.HitboxUseBodyVelocity then
-            -- Удаляем старый BodyVelocity
-            local oldBV = ball:FindFirstChild("RSS_HitBV")
-            if oldBV then oldBV:Destroy() end
-            
-            -- Создаем новый
-            local bv = Instance.new("BodyVelocity")
-            bv.Name = "RSS_HitBV"
-            bv.MaxForce = Vector3.new(400000, 400000, 400000)
-            bv.Velocity = dirUnit * Settings.HitboxStrength
-            bv.Parent = ball
-            
-            activeBV[ball] = bv
-            
-            -- Авто-очистка через Debris
-            Debris:AddItem(bv, 0.3)
-            
-            -- Очищаем из таблицы
-            task.delay(0.3, function()
-                activeBV[ball] = nil
-            end)
-        else
-            -- Прямое изменение скорости
-            pcall(function()
-                ball.AssemblyLinearVelocity = dirUnit * Settings.HitboxStrength
-            end)
-        end
-    end
-end
 
-local function checkBallsInRadius()
-    if not Settings.HitboxEnabled or not hitboxPart then return end
-    
-    local position = hitboxPart.Position
-    local radius = Settings.HitboxRadius
-    
-    -- Ищем все мячи в радиусе
-    for _, ball in pairs(workspace:GetPartsInPart(hitboxPart)) do
-        if ball and ball:IsA("BasePart") and isBall(ball) then
-            local distance = (ball.Position - position).Magnitude
-            if distance <= radius then
-                affectBall(ball)
-            end
-        end
+        ball.AssemblyLinearVelocity = reflected
     end
-    
-    -- Также проверяем все шары в игре для GK
-    if Settings.GKMode and Settings.AutoGK then
-        local now = tick()
-        if now - lastGKCheck >= Settings.GK_ReactionTime then
-            lastGKCheck = now
-            
-            for _, obj in pairs(workspace:GetDescendants()) do
-                if obj:IsA("BasePart") and isBall(obj) then
-                    local ballVel = obj.AssemblyLinearVelocity
-                    if isBallThreateningGoal(obj, ballVel) then
-                        performGKSave(obj)
-                        break  -- Обрабатываем только один мяч за раз
-                    end
-                end
-            end
-        end
-    end
-end
-
-local function startUpdater()
-    if connection then 
-        connection:Disconnect() 
-        connection = nil
-    end
-    
-    createHitbox()
-    
-    connection = RunService.Heartbeat:Connect(function()
-        if not Settings.HitboxEnabled then 
-            if hitboxPart then
-                hitboxPart.Transparency = 1
-            end
-            return 
-        end
-        
-        -- Обновляем позицию хитбокса
-        local char = LocalPlayer.Character
-        if char then
-            local hrp = char:FindFirstChild("HumanoidRootPart")
-            if hrp and hitboxPart then
-                hitboxPart.Position = hrp.Position
-                
-                -- Обновляем видимость
-                hitboxPart.Transparency = Settings.VisualizerEnabled and Settings.VisualizerTransparency or 1
-                hitboxPart.Size = Vector3.new(Settings.HitboxRadius * 2, Settings.HitboxRadius * 2, Settings.HitboxRadius * 2)
-                
-                -- Меняем цвет в зависимости от режима
-                if Settings.GKMode and Settings.AutoGK then
-                    hitboxPart.Color = Color3.fromRGB(100, 150, 255)  -- Синий для GK
-                else
-                    hitboxPart.Color = Color3.fromRGB(255, 100, 100)  -- Красный для обычного
-                end
-            end
-        end
-        
-        -- Проверяем мячи
-        checkBallsInRadius()
-    end)
-end
-
-local function stopUpdater()
-    if connection then 
-        connection:Disconnect() 
-        connection = nil
-    end
-    
-    destroyHitbox()
-    
-    -- Очищаем все BodyVelocity
-    for _, bv in pairs(activeBV) do
-        if bv and bv.Parent then
-            pcall(function() bv:Destroy() end)
-        end
-    end
-    activeBV = {}
-    perBallLast = {}
-end
-
--- UI Elements
-Tab:CreateToggle({
-    Name = "🧲 Включить Хитбокс",
-    CurrentValue = false,
-    Callback = function(val)
-        Settings.HitboxEnabled = val
-        if val then
-            startUpdater()
-            Rayfield:Notify({
-                Title = "✅ Хитбокс включен",
-                Content = "Радиус: " .. Settings.HitboxRadius,
-                Duration = 2
-            })
-        else
-            stopUpdater()
-            Rayfield:Notify({
-                Title = "❌ Хитбокс выключен",
-                Content = "",
-                Duration = 1
-            })
-        end
-    end
-})
-
-Tab:CreateToggle({
-    Name = "👁️ Показать Хитбокс",
-    CurrentValue = true,
-    Callback = function(val)
-        Settings.VisualizerEnabled = val
-        if hitboxPart then
-            hitboxPart.Transparency = val and Settings.VisualizerTransparency or 1
-        end
-        Rayfield:Notify({
-            Title = "👁️ Визуализация: " .. (val and "ВКЛ" or "ВЫКЛ"),
-            Content = "",
-            Duration = 1
-        })
-    end
-})
-
-Tab:CreateSlider({
-    Name = "🎯 Прозрачность хитбокса",
-    Range = {0.3, 0.9},
-    Increment = 0.05,
-    CurrentValue = 0.8,
-    Callback = function(v)
-        Settings.VisualizerTransparency = v
-        if hitboxPart and Settings.VisualizerEnabled then
-            hitboxPart.Transparency = v
-        end
-    end
-})
-
-Tab:CreateSlider({
-    Name = "📏 Радиус хитбокса",
-    Range = {3, 30},
-    Increment = 1,
-    CurrentValue = Settings.HitboxRadius,
-    Callback = function(v)
-        Settings.HitboxRadius = v
-        if hitboxPart then 
-            hitboxPart.Size = Vector3.new(v * 2, v * 2, v * 2) 
-        end
-    end
-})
-
-Tab:CreateSlider({
-    Name = "💪 Сила притяжения",
-    Range = {20, 200},
-    Increment = 5,
-    CurrentValue = Settings.HitboxStrength,
-    Callback = function(v) 
-        Settings.HitboxStrength = v 
-    end
-})
-
-Tab:CreateToggle({
-    Name = "⚡ Использовать BodyVelocity",
-    CurrentValue = Settings.HitboxUseBodyVelocity,
-    Callback = function(v) 
-        Settings.HitboxUseBodyVelocity = v 
-    end
-})
-
-Tab:CreateSlider({
-    Name = "⏱️ Кулдаун на мяч",
-    Range = {0.1, 2},
-    Increment = 0.05,
-    CurrentValue = Settings.PerBallCooldown,
-    Callback = function(v) 
-        Settings.PerBallCooldown = v 
-    end
-})
-
--- Вкладка вратаря
-TabGK:CreateToggle({
-    Name = "🥅 Режим вратаря",
-    CurrentValue = Settings.GKMode,
-    Callback = function(v) 
-        Settings.GKMode = v
-        Rayfield:Notify({
-            Title = "🥅 Режим вратаря",
-            Content = v and "ВКЛЮЧЕН" or "ВЫКЛЮЧЕН",
-            Duration = 1
-        })
-    end
-})
-
-TabGK:CreateToggle({
-    Name = "🤖 Авто-сейв вратаря",
-    CurrentValue = true,
-    Callback = function(v) 
-        Settings.AutoGK = v
-        Rayfield:Notify({
-            Title = "🤖 Авто-сейв",
-            Content = v and "АКТИВИРОВАН" or "ДЕАКТИВИРОВАН",
-            Duration = 1
-        })
-    end
-})
-
-TabGK:CreateSlider({
-    Name = "💨 Скорость отбития",
-    Range = {50, 250},
-    Increment = 5,
-    CurrentValue = Settings.GK_SaveSpeed,
-    Callback = function(v) 
-        Settings.GK_SaveSpeed = v 
-    end
-})
-
-TabGK:CreateSlider({
-    Name = "🚫 Мин. скорость мяча для сейва",
-    Range = {5, 50},
-    Increment = 1,
-    CurrentValue = Settings.GK_MinBallSpeed,
-    Callback = function(v) 
-        Settings.GK_MinBallSpeed = v 
-    end
-})
-
-TabGK:CreateSlider({
-    Name = "🎯 Угол реакции (чем меньше, тем точнее)",
-    Range = {0.1, 0.9},
-    Increment = 0.05,
-    CurrentValue = Settings.GK_DotThreshold,
-    Callback = function(v) 
-        Settings.GK_DotThreshold = v 
-    end
-})
-
-TabGK:CreateSlider({
-    Name = "📏 Макс. дистанция для сейва",
-    Range = {5, 50},
-    Increment = 1,
-    CurrentValue = Settings.GK_MaxDistanceToAttempt,
-    Callback = function(v) 
-        Settings.GK_MaxDistanceToAttempt = v 
-    end
-})
-
-TabGK:CreateSlider({
-    Name = "⚡ Скорость реакции (сек)",
-    Range = {0.05, 0.5},
-    Increment = 0.05,
-    CurrentValue = Settings.GK_ReactionTime,
-    Callback = function(v) 
-        Settings.GK_ReactionTime = v 
-    end
-})
-
-TabGK:CreateButton({
-    Name = "🔍 Найти мои ворота",
-    Callback = function()
-        local goal = findMyGoal()
-        if goal then
-            Rayfield:Notify({
-                Title = "🥅 Ворота найдены!",
-                Content = "Позиция: " .. math.floor(goal.Position.X) .. ", " .. 
-                         math.floor(goal.Position.Y) .. ", " .. math.floor(goal.Position.Z),
-                Duration = 3
-            })
-        else
-            Rayfield:Notify({
-                Title = "❌ Ворота не найдены",
-                Content = "Проверьте название ворот (должно содержать 'Goal')",
-                Duration = 3
-            })
-        end
-    end
-})
-
--- Cleanup
-game:BindToClose(function()
-    stopUpdater()
 end)
 
-Rayfield:Notify({
-    Title = "✅ Скрипт загружен",
-    Content = "Hitbox Magnet v2.0 готов к работе!\nАвто-вратарь: ВКЛ",
-    Duration = 5
-})
+-- ========= МЕНЮ =========
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "GK_HitboxHub"
+ScreenGui.ResetOnSpawn = false
+ScreenGui.Parent = game.CoreGui
 
--- Дебаг информация
-local function printDebugInfo()
-    print("=== RSS Hitbox Debug ===")
-    print("Hitbox Enabled:", Settings.HitboxEnabled)
-    print("GK Mode:", Settings.GKMode)
-    print("Auto GK:", Settings.AutoGK)
-    print("Hitbox Radius:", Settings.HitboxRadius)
-    print("Visualizer Transparency:", Settings.VisualizerTransparency)
-    print("=====================")
+local Frame = Instance.new("Frame")
+Frame.Size = UDim2.new(0, 230, 0, 240)
+Frame.Position = UDim2.new(0.03, 0, 0.25, 0)
+Frame.BackgroundColor3 = Color3.fromRGB(15, 15, 25)
+Frame.BackgroundTransparency = 0.1
+Frame.BorderSizePixel = 0
+Frame.Active = true
+Frame.Draggable = true
+Frame.Parent = ScreenGui
+
+local fc = Instance.new("UICorner", Frame)
+fc.CornerRadius = UDim.new(0, 12)
+local fs = Instance.new("UIStroke", Frame)
+fs.Thickness = 2
+fs.Color = Color3.fromRGB(0, 200, 255)
+
+local Title = Instance.new("TextLabel")
+Title.Size = UDim2.new(1, -10, 0, 28)
+Title.Position = UDim2.new(0, 5, 0, 5)
+Title.BackgroundTransparency = 1
+Title.Text = "GK Hitbox Hub"
+Title.Font = Enum.Font.GothamBold
+Title.TextScaled = true
+Title.TextColor3 = Color3.fromRGB(255, 255, 255)
+Title.Parent = Frame
+
+local function makeBtn(text, y, cb)
+    local b = Instance.new("TextButton")
+    b.Size = UDim2.new(1, -20, 0, 30)
+    b.Position = UDim2.new(0, 10, 0, y)
+    b.BackgroundColor3 = Color3.fromRGB(50, 50, 70)
+    b.Text = text
+    b.Font = Enum.Font.GothamMedium
+    b.TextScaled = true
+    b.TextColor3 = Color3.fromRGB(255, 255, 255)
+    b.AutoButtonColor = false
+    b.Parent = Frame
+    local c = Instance.new("UICorner", b)
+    c.CornerRadius = UDim.new(0, 8)
+    b.MouseButton1Click:Connect(function() cb(b) end)
+    return b
 end
 
--- Запускаем дебаг
-task.wait(1)
-printDebugInfo()
+-- ON/OFF
+makeBtn("Hitbox: ON", 40, function(btn)
+    Settings.Enabled = not Settings.Enabled
+    btn.Text = Settings.Enabled and "Hitbox: ON" or "Hitbox: OFF"
+    btn.BackgroundColor3 = Settings.Enabled and Color3.fromRGB(0, 200, 100) or Color3.fromRGB(50, 50, 70)
+    updateShieldVisible()
+end)
+
+-- Режим (на будущее, можно оставить для совместимости)
+makeBtn("Mode: Front", 80, function(btn)
+    Settings.RadiusMode = (Settings.RadiusMode == "Front") and "Circle" or "Front"
+    btn.Text = "Mode: " .. Settings.RadiusMode
+end)
+
+-- Сила
+makeBtn("Power: "..Settings.Power, 120, function(btn)
+    local steps = {80, 100, 110, 120, 140}
+    local i = 1
+    for n, v in ipairs(steps) do
+        if v == Settings.Power then i = n break end
+    end
+    i = i % #steps + 1
+    Settings.Power = steps[i]
+    btn.Text = "Power: "..Settings.Power
+end)
+
+-- Размер щита
+makeBtn("Size: "..Settings.RadiusSize, 160, function(btn)
+    local steps = {10, 12, 14, 16, 18}
+    local i = 1
+    for n, v in ipairs(steps) do
+        if v == Settings.RadiusSize then i = n break end
+    end
+    i = i % #steps + 1
+    Settings.RadiusSize = steps[i]
+    btn.Text = "Size: "..Settings.RadiusSize
+end)
+
+-- Показ/скрытие щита
+makeBtn("Shield Vis: ON", 200, function(btn)
+    Settings.ShowRadius = not Settings.ShowRadius
+    btn.Text = "Shield Vis: "..(Settings.ShowRadius and "ON" or "OFF")
+    updateShieldVisible()
+end)
+
+print("✅ GK Hitbox Hub загружен. Включи Hitbox и настрой Size/Power под себя.")
