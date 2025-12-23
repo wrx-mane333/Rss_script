@@ -1,718 +1,89 @@
--- ⚽ ENHANCED REALISTIC STREET SOCCER SCRIPT V3.0
--- 🎯 Авто-гол, хитбоксы с физикой, ESP, античит, мобильное меню
--- ✅ Работает на Delta для ПК и телефонов
-
+-- 🎯 MINIMAL SAFE RSS SCRIPT v1.0
+-- Только ESP мяча + хитбоксы (без бана)
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
-local Workspace = game:GetService("Workspace")
-local HttpService = game:GetService("HttpService")
-local UserInputService = game:GetService("UserInputService")
-local TweenService = game:GetService("TweenService")
-
 local lp = Players.LocalPlayer
 
-print("=== 🎯 REALISTIC STREET SOCCER ENHANCED LOADED ===")
+print("=== RSS BALL TRACKER LOADED ===")
 
--- ======================= НАСТРОЙКИ =======================
-local SETTINGS = {
-    -- 🎮 Основные функции
-    AUTO_SCORE = true,
-    AUTO_SCORE_KEY = Enum.KeyCode.F,
-    AUTO_TACKLE = false,
-    AUTO_TACKLE_RANGE = 15,
-    
-    -- 🏃 Игрок
-    SPEED_BOOST = 1.5, -- множитель скорости
-    INFINITE_STAMINA = true,
-    HIGH_JUMP = false,
-    
-    -- 🎯 ESP
-    BALL_ESP = true,
-    BALL_ESP_COLOR = Color3.fromRGB(0, 255, 0),
-    PLAYER_ESP = false,
-    GOAL_ESP = true,
-    
-    -- ⚡ Хитбоксы
-    HITBOX_ENABLED = true,
-    HITBOX_COLOR = Color3.fromRGB(0, 170, 255),
-    HITBOX_TRANSPARENCY = 0.7,
-    HITBOX_BOUNCE_FORCE = 1.2,
-    
-    -- 📱 Мобильный интерфейс
-    MOBILE_UI = true,
-    MOBILE_BUTTON_SIZE = 60,
-    
-    -- 🔒 Античит
-    ANTI_CHEAT = true,
-    MAX_SPEED = 80,
-    SPEED_CHECK_INTERVAL = 2
-}
+-- НАЙТИ МЯЧИ КАК В ВАШЕМ ПРИМЕРЕ
+local balls = {}
+for _, v in ipairs(workspace:GetDescendants()) do
+    if v:IsA("BasePart") and (v.Name:lower():find("ball") or v.Name:lower():find("football") or v.Name:lower():find("soccer")) then
+        table.insert(balls, v)
+        print("[BALL FOUND] ", v:GetFullName())
+    end
+end
 
--- ======================= ПЕРЕМЕННЫЕ =======================
-local ballCandidates = {}
+-- ESP МЯЧА (ВАШ КОД)
+for _, ball in ipairs(balls) do
+    local hl = Instance.new("Highlight")
+    hl.FillColor = Color3.fromRGB(0, 255, 0)
+    hl.OutlineColor = Color3.fromRGB(255, 255, 0)
+    hl.FillTransparency = 0.6
+    hl.OutlineTransparency = 0
+    hl.Adornee = ball
+    hl.Parent = ball
+    
+    local gui = Instance.new("BillboardGui")
+    gui.Size = UDim2.new(0, 200, 0, 40)
+    gui.AlwaysOnTop = true
+    gui.MaxDistance = 200
+    gui.Adornee = ball
+    gui.Parent = ball
+    
+    local label = Instance.new("TextLabel")
+    label.Size = UDim2.new(1, 0, 1, 0)
+    label.BackgroundTransparency = 1
+    label.TextScaled = true
+    label.Font = Enum.Font.GothamBold
+    label.TextColor3 = Color3.fromRGB(255, 255, 0)
+    label.TextStrokeTransparency = 0.2
+    label.Text = ball.Name
+    label.Parent = gui
+end
+
+-- ПРОСТЫЕ ХИТБОКСЫ БЕЗ ФИЗИКИ
+local function createSafeHitbox(pos, size, name)
+    local part = Instance.new("Part")
+    part.Name = name
+    part.Size = size
+    part.Position = pos
+    part.Transparency = 0.8
+    part.Anchored = true
+    part.CanCollide = true
+    part.Material = Enum.Material.Neon
+    part.Color = Color3.fromRGB(0, 170, 255)
+    part.Parent = workspace
+    
+    -- Просто визуальная граница, физика от игры
+    return part
+end
+
+-- СОЗДАТЬ ГРАНИЦЫ ПОЛЯ (настройте под вашу карту)
 local hitboxes = {}
-local ballESP = {}
-local mobileButtons = {}
-local lastAutoScoreTime = 0
-local autoScoreCooldown = 1
+table.insert(hitboxes, createSafeHitbox(Vector3.new(0, 5, 50), Vector3.new(120, 10, 2), "NorthWall"))
+table.insert(hitboxes, createSafeHitbox(Vector3.new(0, 5, -50), Vector3.new(120, 10, 2), "SouthWall"))
+table.insert(hitboxes, createSafeHitbox(Vector3.new(60, 5, 0), Vector3.new(2, 10, 100), "EastWall"))
+table.insert(hitboxes, createSafeHitbox(Vector3.new(-60, 5, 0), Vector3.new(2, 10, 100), "WestWall"))
 
--- ======================= БАЗОВЫЕ ФУНКЦИИ =======================
-function findBalls()
-    ballCandidates = {}
-    
-    for _, obj in ipairs(Workspace:GetDescendants()) do
-        if obj:IsA("BasePart") then
-            local nameLower = obj.Name:lower()
-            if nameLower:find("ball") or 
-               nameLower:find("football") or 
-               nameLower:find("soccer") or
-               obj:GetAttribute("IsBall") or
-               obj:FindFirstChild("BallScript") then
-                table.insert(ballCandidates, obj)
-            end
-        end
-    end
-    
-    -- Если не нашли, создаем дефолтный поиск по размеру
-    if #ballCandidates == 0 then
-        for _, obj in ipairs(Workspace:GetDescendants()) do
-            if obj:IsA("BasePart") and (obj.Size.X > 1.5 and obj.Size.X < 3) then
-                table.insert(ballCandidates, obj)
-            end
-        end
-    end
-    
-    warn("✅ Найдено кандидатов на мяч: " .. #ballCandidates)
-    return ballCandidates
-end
-
--- ======================= ФУНКЦИЯ ХИТБОКСОВ =======================
-function createHitbox(position, size, name, options)
-    if not SETTINGS.HITBOX_ENABLED then return nil end
-    
-    options = options or {}
-    
-    local hitbox = Instance.new("Part")
-    hitbox.Name = name or "Hitbox_" .. HttpService:GenerateGUID(false)
-    hitbox.Size = size or Vector3.new(10, 5, 1)
-    hitbox.Position = position
-    hitbox.Transparency = options.Transparency or SETTINGS.HITBOX_TRANSPARENCY
-    hitbox.CanCollide = false
-    hitbox.Anchored = true
-    hitbox.Material = Enum.Material.Neon
-    hitbox.Color = options.Color or SETTINGS.HITBOX_COLOR
-    hitbox.CastShadow = false
-    
-    -- Атрибуты для идентификации
-    hitbox:SetAttribute("IsHitbox", true)
-    hitbox:SetAttribute("BounceForce", options.BounceForce or SETTINGS.HITBOX_BOUNCE_FORCE)
-    
-    -- Создаем TouchTransmitter для обнаружения касаний
-    local touch = Instance.new("TouchTransmitter")
-    touch.Parent = hitbox
-    
-    -- Подсветка хитбокса
-    if options.Highlight ~= false then
-        local highlight = Instance.new("Highlight")
-        highlight.Name = "HitboxHighlight"
-        highlight.FillColor = hitbox.Color
-        highlight.OutlineColor = Color3.fromRGB(255, 255, 255)
-        highlight.FillTransparency = hitbox.Transparency + 0.2
-        highlight.OutlineTransparency = 0
-        highlight.Adornee = hitbox
-        highlight.Parent = hitbox
-    end
-    
-    hitbox.Parent = Workspace
-    table.insert(hitboxes, hitbox)
-    
-    -- Обработчик касания мяча
-    hitbox.Touched:Connect(function(hit)
-        handleBallHit(hit, hitbox)
-    end)
-    
-    return hitbox
-end
-
-function handleBallHit(hitPart, hitbox)
-    -- Проверяем, что это мяч
-    for _, ball in ipairs(ballCandidates) do
-        if hitPart == ball or hitPart:IsDescendantOf(ball) then
-            -- Вычисляем нормаль отскока
-            local hitNormal = (ball.Position - hitbox.Position).Unit
-            
-            -- Получаем текущую скорость мяча
-            local velocity = ball.AssemblyLinearVelocity
-            
-            -- Применяем отскок с учётом силы хитбокса
-            local bounceForce = hitbox:GetAttribute("BounceForce") or 1.2
-            local newVelocity = velocity - (2 * velocity:Dot(hitNormal)) * hitNormal * bounceForce
-            
-            -- Применяем новую скорость
-            ball.AssemblyLinearVelocity = newVelocity
-            
-            -- Визуальный эффект
-            spawn(function()
-                if hitbox:FindFirstChild("HitboxHighlight") then
-                    local originalColor = hitbox.HitboxHighlight.FillColor
-                    hitbox.HitboxHighlight.FillColor = Color3.fromRGB(255, 50, 50)
-                    
-                    wait(0.1)
-                    
-                    if hitbox and hitbox.Parent then
-                        hitbox.HitboxHighlight.FillColor = originalColor
-                    end
-                end
-            end)
-            
-            break
-        end
-    end
-end
-
-function setupFieldHitboxes()
-    -- Очищаем старые хитбоксы
-    for _, hb in ipairs(hitboxes) do
-        if hb and hb.Parent then
-            hb:Destroy()
-        end
-    end
-    hitboxes = {}
-    
-    -- Определяем размеры поля
-    local fieldCenter = Vector3.new(0, 5, 0)
-    local fieldWidth = 120
-    local fieldLength = 80
-    
-    -- Боковые стенки
-    createHitbox(
-        fieldCenter + Vector3.new(0, 3, fieldLength/2), 
-        Vector3.new(fieldWidth, 8, 1), 
-        "Wall_North",
-        {BounceForce = 1.3}
-    )
-    
-    createHitbox(
-        fieldCenter + Vector3.new(0, 3, -fieldLength/2), 
-        Vector3.new(fieldWidth, 8, 1), 
-        "Wall_South",
-        {BounceForce = 1.3}
-    )
-    
-    createHitbox(
-        fieldCenter + Vector3.new(fieldWidth/2, 3, 0), 
-        Vector3.new(1, 8, fieldLength), 
-        "Wall_East",
-        {BounceForce = 1.3}
-    )
-    
-    createHitbox(
-        fieldCenter + Vector3.new(-fieldWidth/2, 3, 0), 
-        Vector3.new(1, 8, fieldLength), 
-        "Wall_West",
-        {BounceForce = 1.3}
-    )
-    
-    -- Центральные препятствия (как на ваших скриншотах)
-    createHitbox(
-        fieldCenter + Vector3.new(15, 2, 15), 
-        Vector3.new(8, 5, 1), 
-        "Obstacle_1",
-        {Color = Color3.fromRGB(255, 100, 0), BounceForce = 1.5}
-    )
-    
-    createHitbox(
-        fieldCenter + Vector3.new(-15, 2, -15), 
-        Vector3.new(1, 5, 8), 
-        "Obstacle_2",
-        {Color = Color3.fromRGB(255, 100, 0), BounceForce = 1.5}
-    )
-    
-    -- Ворота (более тонкие)
-    createHitbox(
-        Vector3.new(0, 3, fieldLength/2 - 2), 
-        Vector3.new(20, 8, 0.5), 
-        "Goal_North",
-        {Color = Color3.fromRGB(0, 255, 0), Transparency = 0.8, BounceForce = 1.8}
-    )
-    
-    createHitbox(
-        Vector3.new(0, 3, -fieldLength/2 + 2), 
-        Vector3.new(20, 8, 0.5), 
-        "Goal_South",
-        {Color = Color3.fromRGB(0, 255, 0), Transparency = 0.8, BounceForce = 1.8}
-    )
-    
-    warn("✅ Хитбоксы созданы: " .. #hitboxes .. " штук")
-end
-
--- ======================= BALL ESP (УЛУЧШЕННЫЙ) =======================
-function setupBallESP()
-    -- Очищаем старый ESP
-    for _, esp in pairs(ballESP) do
-        if esp and esp.Parent then
-            esp:Destroy()
-        end
-    end
-    ballESP = {}
-    
-    if not SETTINGS.BALL_ESP then return end
-    
-    for _, ball in ipairs(ballCandidates) do
-        -- Подсветка мяча
-        local highlight = Instance.new("Highlight")
-        highlight.Name = "BallESP_Highlight"
-        highlight.FillColor = SETTINGS.BALL_ESP_COLOR
-        highlight.OutlineColor = Color3.fromRGB(255, 255, 0)
-        highlight.FillTransparency = 0.6
-        highlight.OutlineTransparency = 0
-        highlight.Adornee = ball
-        highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
-        highlight.Parent = ball
-        
-        -- Текстовая метка
-        local billboard = Instance.new("BillboardGui")
-        billboard.Name = "BallESP_Billboard"
-        billboard.Size = UDim2.new(0, 200, 0, 50)
-        billboard.AlwaysOnTop = true
-        billboard.MaxDistance = 500
-        billboard.Adornee = ball
-        billboard.Parent = ball
-        
-        local label = Instance.new("TextLabel")
-        label.Name = "BallLabel"
-        label.Size = UDim2.new(1, 0, 1, 0)
-        label.BackgroundTransparency = 1
-        label.TextScaled = true
-        label.Font = Enum.Font.GothamBold
-        label.TextColor3 = Color3.fromRGB(255, 255, 0)
-        label.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
-        label.TextStrokeTransparency = 0.3
-        label.Text = "⚽ " .. ball.Name
-        label.Parent = billboard
-        
-        -- Дистанция (обновляется в реальном времени)
-        local distLabel = Instance.new("TextLabel")
-        distLabel.Name = "DistanceLabel"
-        distLabel.Size = UDim2.new(1, 0, 0, 20)
-        distLabel.Position = UDim2.new(0, 0, 1, 0)
-        distLabel.BackgroundTransparency = 1
-        distLabel.TextScaled = true
-        distLabel.Font = Enum.Font.Gotham
-        distLabel.TextColor3 = Color3.fromRGB(200, 200, 255)
-        distLabel.TextStrokeTransparency = 0.3
-        distLabel.Text = "0 studs"
-        distLabel.Parent = billboard
-        
-        table.insert(ballESP, {highlight = highlight, billboard = billboard, ball = ball})
-    end
-end
-
-function updateBallESP()
+-- МОНИТОР ДИСТАНЦИИ (ваш код)
+RunService.Heartbeat:Connect(function()
     local char = lp.Character
     local root = char and char:FindFirstChild("HumanoidRootPart")
     if not root then return end
     
-    for _, espData in ipairs(ballESP) do
-        if espData.ball and espData.ball.Parent and espData.billboard.Parent then
-            local dist = (espData.ball.Position - root.Position).Magnitude
-            local distLabel = espData.billboard:FindFirstChild("DistanceLabel")
-            if distLabel then
-                distLabel.Text = string.format("%.1f studs", dist)
-                
-                -- Меняем цвет в зависимости от расстояния
-                if dist < 10 then
-                    espData.highlight.FillColor = Color3.fromRGB(0, 255, 0)
-                elseif dist < 30 then
-                    espData.highlight.FillColor = Color3.fromRGB(255, 255, 0)
-                else
-                    espData.highlight.FillColor = Color3.fromRGB(255, 50, 50)
-                end
-            end
-        end
-    end
-end
-
--- ======================= АВТО-ГОЛ =======================
-function autoScore()
-    if not SETTINGS.AUTO_SCORE then return end
-    if tick() - lastAutoScoreTime < autoScoreCooldown then return end
-    
-    local char = lp.Character
-    local root = char and char:FindFirstChild("HumanoidRootPart")
-    if not root then return end
-    
-    -- Ищем ближайший мяч
-    local closestBall = nil
-    local closestDist = math.huge
-    
-    for _, ball in ipairs(ballCandidates) do
+    for i, ball in ipairs(balls) do
         if ball and ball.Parent then
             local dist = (ball.Position - root.Position).Magnitude
-            if dist < closestDist and dist < 50 then
-                closestDist = dist
-                closestBall = ball
+            if dist < 10 then
+                -- Просто информация, никаких авто-действий
             end
-        end
-    end
-    
-    if closestBall then
-        -- Определяем направление к ближайшим воротам
-        local goalPositions = {
-            Vector3.new(0, 3, 40),   -- Северные ворота
-            Vector3.new(0, 3, -40)   -- Южные ворота
-        }
-        
-        local targetGoal = goalPositions[1]
-        if (root.Position - goalPositions[2]).Magnitude < (root.Position - goalPositions[1]).Magnitude then
-            targetGoal = goalPositions[2]
-        end
-        
-        -- Направление удара
-        local direction = (targetGoal - closestBall.Position).Unit
-        
-        -- Применяем силу к мячу
-        local bodyVelocity = closestBall:FindFirstChild("BodyVelocity") or Instance.new("BodyVelocity")
-        bodyVelocity.Velocity = direction * 80
-        bodyVelocity.MaxForce = Vector3.new(10000, 10000, 10000)
-        bodyVelocity.P = 1000
-        bodyVelocity.Parent = closestBall
-        
-        lastAutoScoreTime = tick()
-        
-        -- Визуальный эффект удара
-        spawn(function()
-            if closestBall:FindFirstChild("BallESP_Highlight") then
-                local originalColor = closestBall.BallESP_Highlight.FillColor
-                closestBall.BallESP_Highlight.FillColor = Color3.fromRGB(255, 0, 0)
-                
-                wait(0.2)
-                
-                if closestBall and closestBall.Parent then
-                    closestBall.BallESP_Highlight.FillColor = originalColor
-                end
-            end
-        end)
-        
-        print("✅ Авто-гол активирован! Мяч летит к воротам.")
-    end
-end
-
--- ======================= УПРАВЛЕНИЕ ИГРОКОМ =======================
-function applyPlayerMods()
-    local char = lp.Character
-    if not char then return end
-    
-    local humanoid = char:FindFirstChild("Humanoid")
-    if humanoid then
-        -- Скорость
-        humanoid.WalkSpeed = 16 * SETTINGS.SPEED_BOOST
-        
-        -- Прыжок
-        if SETTINGS.HIGH_JUMP then
-            humanoid.JumpPower = 60
-        end
-        
-        -- Бесконечная выносливость
-        if SETTINGS.INFINITE_STAMINA then
-            pcall(function()
-                humanoid:SetAttribute("Stamina", 100)
-            end)
-        end
-    end
-end
-
--- ======================= МОБИЛЬНЫЙ ИНТЕРФЕЙС =======================
-function createMobileUI()
-    if not SETTINGS.MOBILE_UI or not UserInputService.TouchEnabled then return end
-    
-    -- Очищаем старые кнопки
-    for _, btn in ipairs(mobileButtons) do
-        if btn and btn.Parent then
-            btn:Destroy()
-        end
-    end
-    mobileButtons = {}
-    
-    local screenGui = Instance.new("ScreenGui")
-    screenGui.Name = "MobileSoccerUI"
-    screenGui.ResetOnSpawn = false
-    screenGui.Parent = lp:WaitForChild("PlayerGui")
-    
-    local buttonTemplates = {
-        {
-            Name = "SCORE",
-            Position = UDim2.new(1, -70, 0.5, -30),
-            Color = Color3.fromRGB(0, 200, 0),
-            Action = function()
-                autoScore()
-            end
-        },
-        {
-            Name = "SPEED+",
-            Position = UDim2.new(1, -70, 0.6, -30),
-            Color = Color3.fromRGB(0, 150, 255),
-            Action = function()
-                SETTINGS.SPEED_BOOST = math.min(3, SETTINGS.SPEED_BOOST + 0.2)
-                applyPlayerMods()
-            end
-        },
-        {
-            Name = "SPEED-",
-            Position = UDim2.new(1, -70, 0.7, -30),
-            Color = Color3.fromRGB(255, 100, 0),
-            Action = function()
-                SETTINGS.SPEED_BOOST = math.max(1, SETTINGS.SPEED_BOOST - 0.2)
-                applyPlayerMods()
-            end
-        },
-        {
-            Name = "HITBOX",
-            Position = UDim2.new(0, 10, 0.5, -30),
-            Color = Color3.fromRGB(0, 170, 255),
-            Action = function()
-                SETTINGS.HITBOX_ENABLED = not SETTINGS.HITBOX_ENABLED
-                setupFieldHitboxes()
-            end
-        },
-        {
-            Name = "ESP",
-            Position = UDim2.new(0, 10, 0.6, -30),
-            Color = Color3.fromRGB(255, 255, 0),
-            Action = function()
-                SETTINGS.BALL_ESP = not SETTINGS.BALL_ESP
-                setupBallESP()
-            end
-        }
-    }
-    
-    for _, template in ipairs(buttonTemplates) do
-        local button = Instance.new("TextButton")
-        button.Name = template.Name
-        button.Size = UDim2.new(0, SETTINGS.MOBILE_BUTTON_SIZE, 0, SETTINGS.MOBILE_BUTTON_SIZE)
-        button.Position = template.Position
-        button.BackgroundColor3 = template.Color
-        button.BackgroundTransparency = 0.2
-        button.Text = template.Name
-        button.TextColor3 = Color3.fromRGB(255, 255, 255)
-        button.Font = Enum.Font.GothamBold
-        button.TextSize = 16
-        button.BorderSizePixel = 0
-        
-        -- Эффект при нажатии
-        button.MouseButton1Down:Connect(function()
-            button.BackgroundTransparency = 0.5
-        end)
-        
-        button.MouseButton1Up:Connect(function()
-            button.BackgroundTransparency = 0.2
-            template.Action()
-        end)
-        
-        button.Parent = screenGui
-        table.insert(mobileButtons, button)
-    end
-    
-    -- Информационная панель
-    local infoFrame = Instance.new("Frame")
-    infoFrame.Name = "InfoPanel"
-    infoFrame.Size = UDim2.new(1, -20, 0, 80)
-    infoFrame.Position = UDim2.new(0, 10, 0, 10)
-    infoFrame.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
-    infoFrame.BackgroundTransparency = 0.5
-    infoFrame.BorderSizePixel = 0
-    infoFrame.Parent = screenGui
-    
-    local title = Instance.new("TextLabel")
-    title.Name = "Title"
-    title.Size = UDim2.new(1, 0, 0, 30)
-    title.Position = UDim2.new(0, 0, 0, 0)
-    title.BackgroundTransparency = 1
-    title.Text = "⚽ RSS ENHANCED V3.0"
-    title.TextColor3 = Color3.fromRGB(0, 255, 255)
-    title.Font = Enum.Font.GothamBold
-    title.TextSize = 18
-    title.Parent = infoFrame
-    
-    local status = Instance.new("TextLabel")
-    status.Name = "Status"
-    status.Size = UDim2.new(1, 0, 0, 50)
-    status.Position = UDim2.new(0, 0, 0, 30)
-    status.BackgroundTransparency = 1
-    status.Text = "Мячи: 0 | Хитбоксы: ВЫКЛ"
-    status.TextColor3 = Color3.fromRGB(255, 255, 255)
-    status.Font = Enum.Font.Gotham
-    status.TextSize = 14
-    status.Parent = infoFrame
-    
-    table.insert(mobileButtons, infoFrame)
-    
-    warn("📱 Мобильный интерфейс создан")
-end
-
--- ======================= АНТИЧИТ СИСТЕМА =======================
-function setupAntiCheat()
-    if not SETTINGS.ANTI_CHEAT then return end
-    
-    spawn(function()
-        while wait(SETTINGS.SPEED_CHECK_INTERVAL) do
-            local char = lp.Character
-            if char then
-                local humanoid = char:FindFirstChild("Humanoid")
-                if humanoid and humanoid.WalkSpeed > SETTINGS.MAX_SPEED then
-                    warn("⚠️ Античит: Обнаружена подозрительная скорость")
-                    humanoid.WalkSpeed = 32
-                end
-            end
-        end
-    end)
-    
-    -- Защита от телепортаций
-    local lastPosition = nil
-    spawn(function()
-        while wait(1) do
-            local char = lp.Character
-            if char then
-                local root = char:FindFirstChild("HumanoidRootPart")
-                if root then
-                    if lastPosition then
-                        local distance = (root.Position - lastPosition).Magnitude
-                        if distance > 100 then -- Максимум 100 studs в секунду
-                            warn("⚠️ Античит: Возможная телепортация")
-                        end
-                    end
-                    lastPosition = root.Position
-                end
-            end
-        end
-    end)
-end
-
--- ======================= ГОРЯЧИЕ КЛАВИШИ =======================
-function setupHotkeys()
-    UserInputService.InputBegan:Connect(function(input, gameProcessed)
-        if gameProcessed then return end
-        
-        -- Авто-гол на F
-        if input.KeyCode == SETTINGS.AUTO_SCORE_KEY then
-            autoScore()
-        end
-        
-        -- Переключение ESP на H
-        if input.KeyCode == Enum.KeyCode.H then
-            SETTINGS.BALL_ESP = not SETTINGS.BALL_ESP
-            setupBallESP()
-            warn("📡 Ball ESP: " .. (SETTINGS.BALL_ESP and "ВКЛ" or "ВЫКЛ"))
-        end
-        
-        -- Переключение хитбоксов на J
-        if input.KeyCode == Enum.KeyCode.J then
-            SETTINGS.HITBOX_ENABLED = not SETTINGS.HITBOX_ENABLED
-            setupFieldHitboxes()
-            warn("🎯 Хитбоксы: " .. (SETTINGS.HITBOX_ENABLED and "ВКЛ" or "ВЫКЛ"))
-        end
-        
-        -- Сброс хитбоксов на R
-        if input.KeyCode == Enum.KeyCode.R then
-            setupFieldHitboxes()
-            warn("🔄 Хитбоксы пересозданы")
-        end
-    end)
-end
-
--- ======================= ИНИЦИАЛИЗАЦИЯ =======================
-function initialize()
-    print("\n=== ИНИЦИАЛИЗАЦИЯ СКРИПТА ===")
-    
-    -- 1. Ищем мячи
-    findBalls()
-    
-    -- 2. Настраиваем ESP для мячей
-    setupBallESP()
-    
-    -- 3. Создаем хитбоксы
-    setupFieldHitboxes()
-    
-    -- 4. Настраиваем античит
-    setupAntiCheat()
-    
-    -- 5. Создаем мобильный интерфейс
-    createMobileUI()
-    
-    -- 6. Настраиваем горячие клавиши
-    setupHotkeys()
-    
-    print("\n✅ СКРИПТ УСПЕШНО ЗАГРУЖЕН!")
-    print("🎮 Управление:")
-    print("   F - Авто-гол")
-    print("   H - Вкл/Выкл ESP мяча")
-    print("   J - Вкл/Выкл хитбоксы")
-    print("   R - Пересоздать хитбоксы")
-    print("📱 Мобильные кнопки активны")
-end
-
--- ======================= ГЛАВНЫЙ ЦИКЛ =======================
-spawn(function()
-    initialize()
-    
-    RunService.Heartbeat:Connect(function(deltaTime)
-        -- Обновляем ESP дистанции
-        updateBallESP()
-        
-        -- Применяем модификации игрока
-        applyPlayerMods()
-        
-        -- Авто-отбор (если включен)
-        if SETTINGS.AUTO_TACKLE then
-            -- Логика авто-отбора
-        end
-    end)
-end)
-
--- Авто-обновление мячей
-spawn(function()
-    while wait(5) do
-        local oldCount = #ballCandidates
-        findBalls()
-        
-        if #ballCandidates ~= oldCount then
-            setupBallESP()
-            warn("🔄 Обновлен список мячей: " .. #ballCandidates .. " найдено")
         end
     end
 end)
 
--- Анти-АФК
-local VirtualUser = game:GetService("VirtualUser")
-game:GetService("Players").LocalPlayer.Idled:Connect(function()
-    VirtualUser:Button2Down(Vector2.new(0,0), Workspace.CurrentCamera.CFrame)
-    wait(1)
-    VirtualUser:Button2Up(Vector2.new(0,0), Workspace.CurrentCamera.CFrame)
-end)
-
-print("\n=== 🎯 СИСТЕМА ГОТОВА К РАБОТЕ ===")
-print("🎯 Найдено мячей: " .. #ballCandidates)
-print("🎯 Создано хитбоксов: " .. #hitboxes)
-print("📱 Мобильный интерфейс: " .. (UserInputService.TouchEnabled and "АКТИВЕН" or "НЕ АКТИВЕН"))
-print("🔒 Античит система: " .. (SETTINGS.ANTI_CHEAT and "ВКЛ" or "ВЫКЛ"))
-print("\n⚽ Приятной игры в Realistic Street Soccer!")
-
--- Возвращаем управляющие функции
-return {
-    FindBalls = findBalls,
-    SetupHitboxes = setupFieldHitboxes,
-    ToggleESP = function()
-        SETTINGS.BALL_ESP = not SETTINGS.BALL_ESP
-        setupBallESP()
-    end,
-    AutoScore = autoScore,
-    GetSettings = function() return SETTINGS end,
-    UpdateSettings = function(newSettings)
-        for k, v in pairs(newSettings) do
-            if SETTINGS[k] ~= nil then
-                SETTINGS[k] = v
-            end
-        end
-        applyPlayerMods()
-    end
-}
+print("=== SAFE SCRIPT READY ===")
+print("Found balls: " .. #balls)
+print("Hitboxes: 4 walls")
+print("No risky features - low ban risk")
