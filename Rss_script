@@ -1,161 +1,231 @@
--- 🎯 RSS WITH REAL BOUNCE PHYSICS
+-- ⚽ Hitbox Control (Simple & Clean)
+
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
 local lp = Players.LocalPlayer
 
-print("=== RSS BOUNCE PHYSICS LOADED ===")
+-- ========= SETTINGS =========
+local Settings = {
+    Enabled = false,
+    Power = 80,
+    Cooldown = 0.25,
+    HitboxSize = 12,
+    MaxHitboxSize = 35
+}
 
--- НАЙТИ МЯЧИ
-local balls = {}
-for _, v in ipairs(workspace:GetDescendants()) do
-    if v:IsA("BasePart") and (v.Name:lower():find("ball") or v.Name:lower():find("football")) then
-        table.insert(balls, v)
-        print("[BALL] ", v.Name)
-    end
+local lastKick = 0
+
+-- ========= BALL =========
+local function getBall()
+    return workspace:FindFirstChild("ball") or workspace:FindFirstChild("TouchBall")
 end
 
--- ФУНКЦИЯ СОЗДАНИЯ ХИТБОКСА С ФИЗИКОЙ
-local function createBounceHitbox(pos, size, name, bounceForce)
-    bounceForce = bounceForce or 1.3 -- сила отскока
-    
-    local part = Instance.new("Part")
-    part.Name = name
-    part.Size = size
-    part.Position = pos
-    part.Transparency = 0.7
-    part.Anchored = true
-    part.CanCollide = false -- ВАЖНО: CanCollide = false для Touch события
-    part.Material = Enum.Material.Neon
-    part.Color = Color3.fromRGB(0, 170, 255)
-    part.Parent = workspace
-    
-    -- TouchTransmitter для обнаружения касаний
-    local touch = Instance.new("TouchTransmitter")
-    touch.Parent = part
-    
-    -- Подсветка
-    local highlight = Instance.new("Highlight")
-    highlight.FillColor = part.Color
-    highlight.OutlineColor = Color3.fromRGB(255, 255, 255)
-    highlight.FillTransparency = 0.6
-    highlight.OutlineTransparency = 0
-    highlight.Adornee = part
-    highlight.Parent = part
-    
-    -- ФИЗИКА ОТСКОКА
-    part.Touched:Connect(function(hit)
-        -- Проверяем, что это мяч
-        for _, ball in ipairs(balls) do
-            if hit == ball or hit:IsDescendantOf(ball) then
-                -- Вычисляем направление отскока
-                local normal = (ball.Position - part.Position).Unit
-                
-                -- Получаем текущую скорость мяча
-                local vel = ball.AssemblyLinearVelocity
-                
-                -- Формула отскока: V_new = V - 2*(V·N)*N * сила
-                local dotProduct = vel:Dot(normal)
-                local newVelocity = vel - (2 * dotProduct * normal) * bounceForce
-                
-                -- Применяем новую скорость
-                ball.AssemblyLinearVelocity = newVelocity
-                
-                -- Визуальный эффект
-                highlight.FillColor = Color3.fromRGB(255, 50, 50)
-                wait(0.1)
-                highlight.FillColor = part.Color
-                
-                break
-            end
-        end
-    end)
-    
-    return part
+-- ========= HITBOX =========
+local sphere = Instance.new("Part")
+sphere.Shape = Enum.PartType.Ball
+sphere.Anchored = true
+sphere.CanCollide = false
+sphere.Material = Enum.Material.ForceField
+sphere.Color = Color3.fromRGB(0, 255, 120)
+sphere.Transparency = 1
+sphere.Parent = workspace
+
+local function updateSphere()
+    sphere.Size = Vector3.new(Settings.HitboxSize, Settings.HitboxSize, Settings.HitboxSize)
+    sphere.Transparency = Settings.Enabled and 0.4 or 1
 end
 
--- СОЗДАЕМ ХИТБОКСЫ ВОКРУГ ПОЛЯ (настройте координаты!)
-local hitboxes = {}
-local fieldCenter = Vector3.new(0, 5, 0)
-local fieldWidth = 100
-local fieldHeight = 70
+updateSphere()
 
--- Боковые стенки
-table.insert(hitboxes, createBounceHitbox(
-    fieldCenter + Vector3.new(0, 3, fieldHeight/2),
-    Vector3.new(fieldWidth, 8, 1),
-    "NorthWall",
-    1.4
-))
-
-table.insert(hitboxes, createBounceHitbox(
-    fieldCenter + Vector3.new(0, 3, -fieldHeight/2),
-    Vector3.new(fieldWidth, 8, 1),
-    "SouthWall",
-    1.4
-))
-
-table.insert(hitboxes, createBounceHitbox(
-    fieldCenter + Vector3.new(fieldWidth/2, 3, 0),
-    Vector3.new(1, 8, fieldHeight),
-    "EastWall",
-    1.3
-))
-
-table.insert(hitboxes, createBounceHitbox(
-    fieldCenter + Vector3.new(-fieldWidth/2, 3, 0),
-    Vector3.new(1, 8, fieldHeight),
-    "WestWall",
-    1.3
-))
-
--- ДОБАВИТЬ ESP МЯЧА (опционально)
-for _, ball in ipairs(balls) do
-    local gui = Instance.new("BillboardGui")
-    gui.Size = UDim2.new(0, 150, 0, 30)
-    gui.AlwaysOnTop = true
-    gui.Adornee = ball
-    gui.Parent = ball
-    
-    local label = Instance.new("TextLabel")
-    label.Size = UDim2.new(1, 0, 1, 0)
-    label.BackgroundTransparency = 1
-    label.Text = "⚽"
-    label.TextColor3 = Color3.fromRGB(255, 255, 0)
-    label.Font = Enum.Font.GothamBold
-    label.TextSize = 24
-    label.Parent = gui
-end
-
--- ПРОВЕРКА ФИЗИКИ
+-- ========= HIT LOGIC =========
 RunService.Heartbeat:Connect(function()
+    if not Settings.Enabled then return end
+
     local char = lp.Character
     local root = char and char:FindFirstChild("HumanoidRootPart")
     if not root then return end
-    
-    -- Мониторим ближайший мяч
-    local closestBall = nil
-    local closestDist = math.huge
-    
-    for _, ball in ipairs(balls) do
-        if ball and ball.Parent then
-            local dist = (ball.Position - root.Position).Magnitude
-            if dist < closestDist then
-                closestDist = dist
-                closestBall = ball
-            end
-        end
+
+    sphere.CFrame = root.CFrame * CFrame.new(0, 0, -3)
+
+    local ball = getBall()
+    if not ball or not ball:IsA("BasePart") then return end
+    if tick() - lastKick < Settings.Cooldown then return end
+
+    if (ball.Position - sphere.Position).Magnitude <= (Settings.HitboxSize / 2) then
+        lastKick = tick()
+        local dir = (ball.Position - root.Position + Vector3.new(0,1,0)).Unit
+        ball.AssemblyLinearVelocity = dir * Settings.Power + Vector3.new(0,18,0)
     end
 end)
 
-print("=== PHYSICS SYSTEM READY ===")
-print("Balls found: " .. #balls)
-print("Hitboxes: " .. #hitboxes .. " (with bounce physics)")
-print("Bounce force: 1.3-1.4")
+-- ========= UI =========
+local gui = Instance.new("ScreenGui", game.CoreGui)
+gui.Name = "SimpleHitboxUI"
 
--- ИНСТРУКЦИЯ ПО НАСТРОЙКЕ
-print("\n⚠️ НАСТРОЙТЕ КООРДИНАТЫ:")
-print("1. Зайдите в игру")
-print("2. Встаньте в центре поля")
-print("3. В консоли введите: print(game.Players.LocalPlayer.Character.HumanoidRootPart.Position)")
-print("4. Подставьте эти координаты в fieldCenter")
-print("5. Настройте fieldWidth и fieldHeight под размер вашего поля")
+-- Toggle Button
+local toggleBtn = Instance.new("TextButton", gui)
+toggleBtn.Size = UDim2.fromOffset(50, 50)
+toggleBtn.Position = UDim2.fromOffset(10, 10)
+toggleBtn.BackgroundColor3 = Color3.fromRGB(40, 40, 50)
+toggleBtn.Text = "⚽"
+toggleBtn.Font = Enum.Font.GothamBold
+toggleBtn.TextSize = 24
+toggleBtn.TextColor3 = Color3.new(1, 1, 1)
+toggleBtn.AutoButtonColor = false
+
+local btnCorner = Instance.new("UICorner", toggleBtn)
+btnCorner.CornerRadius = UDim.new(1, 0)
+
+-- Mini Menu
+local menu = Instance.new("Frame", gui)
+menu.Size = UDim2.fromOffset(180, 150)
+menu.Position = UDim2.fromOffset(70, 10)
+menu.BackgroundColor3 = Color3.fromRGB(30, 30, 40)
+menu.Visible = false
+
+local menuCorner = Instance.new("UICorner", menu)
+menuCorner.CornerRadius = UDim.new(0, 8)
+
+-- Title
+local title = Instance.new("TextLabel", menu)
+title.Size = UDim2.new(1, 0, 0, 30)
+title.BackgroundTransparency = 1
+title.Text = "HITBOX"
+title.Font = Enum.Font.GothamBold
+title.TextSize = 16
+title.TextColor3 = Color3.new(1, 1, 1)
+
+-- Status Button
+local statusBtn = Instance.new("TextButton", menu)
+statusBtn.Size = UDim2.fromOffset(140, 35)
+statusBtn.Position = UDim2.fromOffset(20, 40)
+statusBtn.Font = Enum.Font.GothamBold
+statusBtn.TextSize = 14
+statusBtn.TextColor3 = Color3.new(1, 1, 1)
+statusBtn.AutoButtonColor = false
+
+local statusCorner = Instance.new("UICorner", statusBtn)
+statusCorner.CornerRadius = UDim.new(0, 6)
+
+-- Size Slider
+local sizeText = Instance.new("TextLabel", menu)
+sizeText.Position = UDim2.fromOffset(20, 85)
+sizeText.Size = UDim2.fromOffset(140, 20)
+sizeText.BackgroundTransparency = 1
+sizeText.Text = "Size: " .. Settings.HitboxSize
+sizeText.Font = Enum.Font.Gotham
+sizeText.TextSize = 14
+sizeText.TextColor3 = Color3.new(1, 1, 1)
+
+local sliderBg = Instance.new("Frame", menu)
+sliderBg.Position = UDim2.fromOffset(20, 110)
+sliderBg.Size = UDim2.fromOffset(140, 6)
+sliderBg.BackgroundColor3 = Color3.fromRGB(60, 60, 70)
+
+local sliderCorner = Instance.new("UICorner", sliderBg)
+sliderCorner.CornerRadius = UDim.new(1, 0)
+
+local sliderFill = Instance.new("Frame", sliderBg)
+sliderFill.BackgroundColor3 = Color3.fromRGB(0, 255, 150)
+sliderFill.Size = UDim2.new(Settings.HitboxSize / Settings.MaxHitboxSize, 0, 1, 0)
+
+local fillCorner = Instance.new("UICorner", sliderFill)
+fillCorner.CornerRadius = UDim.new(1, 0)
+
+-- Close Button
+local closeBtn = Instance.new("TextButton", menu)
+closeBtn.Size = UDim2.fromOffset(20, 20)
+closeBtn.Position = UDim2.fromOffset(150, 5)
+closeBtn.BackgroundTransparency = 1
+closeBtn.Text = "×"
+closeBtn.Font = Enum.Font.GothamBold
+closeBtn.TextSize = 20
+closeBtn.TextColor3 = Color3.new(1, 1, 1)
+closeBtn.AutoButtonColor = false
+
+-- ========= UI FUNCTIONS =========
+local function updateUI()
+    if Settings.Enabled then
+        statusBtn.Text = "ON"
+        statusBtn.BackgroundColor3 = Color3.fromRGB(0, 200, 100)
+        toggleBtn.BackgroundColor3 = Color3.fromRGB(0, 180, 90)
+    else
+        statusBtn.Text = "OFF"
+        statusBtn.BackgroundColor3 = Color3.fromRGB(200, 60, 60)
+        toggleBtn.BackgroundColor3 = Color3.fromRGB(40, 40, 50)
+    end
+    
+    sizeText.Text = "Size: " .. Settings.HitboxSize
+    sliderFill.Size = UDim2.new(Settings.HitboxSize / Settings.MaxHitboxSize, 0, 1, 0)
+    
+    updateSphere()
+end
+
+-- ========= EVENTS =========
+toggleBtn.MouseButton1Click:Connect(function()
+    menu.Visible = not menu.Visible
+    toggleBtn.Text = menu.Visible and "▲" or "⚽"
+end)
+
+closeBtn.MouseButton1Click:Connect(function()
+    menu.Visible = false
+    toggleBtn.Text = "⚽"
+end)
+
+statusBtn.MouseButton1Click:Connect(function()
+    Settings.Enabled = not Settings.Enabled
+    updateUI()
+end)
+
+-- FIXED SLIDER - Mobile Support
+local dragging = false
+sliderBg.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        dragging = true
+    end
+end)
+
+sliderBg.InputEnded:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        dragging = false
+    end
+end)
+
+UserInputService.InputChanged:Connect(function(input)
+    if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+        local mousePos = UserInputService:GetMouseLocation()
+        local scale = math.clamp(
+            (mousePos.X - sliderBg.AbsolutePosition.X) / sliderBg.AbsoluteSize.X,
+            0, 1
+        )
+        Settings.HitboxSize = math.floor(scale * Settings.MaxHitboxSize)
+        updateUI()
+    end
+end)
+
+-- Initial update
+updateUI()
+
+-- Mobile support
+local isMobile = UserInputService.TouchEnabled
+if isMobile then
+    toggleBtn.Size = UDim2.fromOffset(60, 60)
+    toggleBtn.TextSize = 28
+    toggleBtn.Position = UDim2.fromOffset(15, 15)
+    
+    menu.Size = UDim2.fromOffset(200, 170)
+    menu.Position = UDim2.fromOffset(85, 15)
+    
+    statusBtn.Size = UDim2.fromOffset(160, 40)
+    statusBtn.TextSize = 16
+    
+    sizeText.TextSize = 16
+    sliderBg.Size = UDim2.fromOffset(160, 8)
+    sliderBg.Position = UDim2.fromOffset(20, 115)
+    
+    closeBtn.Size = UDim2.fromOffset(25, 25)
+    closeBtn.TextSize = 22
+end
+
+print("✅ Hitbox Loaded - Toggle button at top-left") 
