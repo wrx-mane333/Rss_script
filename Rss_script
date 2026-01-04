@@ -1,418 +1,93 @@
--- ⚽ GOALKEEPER ANTI-KICK SYSTEM v3.0
+-- 🥅 СУПЕР ВРАТАРЬ v4.0 - МЯЧ НИКОГДА НЕ ПРОЙДЁТ
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
-local UserInputService = game:GetService("UserInputService")
 local lp = Players.LocalPlayer
 
--- ========= SETTINGS =========
 local Settings = {
     Enabled = true,
-    ReflectPower = 1.2, -- Отскок мяча (чем выше, тем сильнее отлетает)
-    HitboxSize = 15,
-    MaxHitboxSize = 50,
-    UseHands = true, -- Включить защиту рук
-    UseBody = true, -- Включить защиту тела
-    SmoothMovement = true -- Плавное движение без дёргания
+    Power = 80,
+    Size = 25, -- Радиус хитбокса
+    Predict = true -- Предсказание траектории
 }
 
-local holdingBall = false
-local ballInHands = nil
+local sphere = Instance.new("Part")
+sphere.Name = "GoalkeeperShield"
+sphere.Shape = Enum.PartType.Ball
+sphere.Size = Vector3.new(Settings.Size, Settings.Size, Settings.Size)
+sphere.Material = Enum.Material.ForceField
+sphere.CanCollide = false
+sphere.Anchored = true
+sphere.Transparency = 0.4
+sphere.Color = Color3.fromRGB(0, 255, 150)
+sphere.Parent = workspace
 
--- ========= HITBOX CREATION =========
-local function createProtectionHitbox(name, size, offset)
-    local hitbox = Instance.new("Part")
-    hitbox.Name = name
-    hitbox.Shape = Enum.PartType.Ball
-    hitbox.Size = Vector3.new(size, size, size)
-    hitbox.Material = Enum.Material.ForceField
-    hitbox.CanCollide = false
-    hitbox.TopSurface = Enum.SurfaceType.Smooth
-    hitbox.BottomSurface = Enum.SurfaceType.Smooth
-    hitbox.Transparency = 0.6
-    hitbox.Color = Color3.fromRGB(0, 200, 255)
-    hitbox.CFrame = lp.Character.HumanoidRootPart.CFrame * offset
-    hitbox.CanQuery = false
-    
-    -- Физические свойства: очень тяжелый и неподвижный
-    hitbox.CustomPhysicalProperties = PhysicalProperties.new(10000, 0.7, 0.5)
-    hitbox.Parent = workspace
-    
-    return hitbox
-end
+-- Мини кнопка
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Parent = game.CoreGui
+local ToggleBtn = Instance.new("TextButton")
+ToggleBtn.Parent = ScreenGui
+ToggleBtn.Size = UDim2.fromOffset(55, 55)
+ToggleBtn.Position = UDim2.new(0, 20, 0.5, -27)
+ToggleBtn.BackgroundColor3 = Color3.fromRGB(0, 50, 100)
+ToggleBtn.TextColor3 = Color3.new(1,1,1)
+ToggleBtn.Text = "🥅"
+ToggleBtn.TextSize = 30
+ToggleBtn.Font = Enum.Font.GothamBold
+Instance.new("UICorner", ToggleBtn).CornerRadius = UDim.new(0, 15)
 
-local function setupHitboxes()
-    -- Удаляем старые хитбоксы
-    local oldHitboxes = workspace:FindFirstChild("GoalkeeperHitboxes")
-    if oldHitboxes then oldHitboxes:Destroy() end
-    
-    local container = Instance.new("Folder")
-    container.Name = "GoalkeeperHitboxes"
-    container.Parent = workspace
-    
-    -- Создаём хитбоксы вокруг тела вратаря
-    local hitboxes = {}
-    if Settings.UseHands then
-        hitboxes["LeftHand"] = createProtectionHitbox("LeftHand", Settings.HitboxSize * 0.7, CFrame.new(-0.5, 0.5, -0.5))
-        hitboxes["RightHand"] = createProtectionHitbox("RightHand", Settings.HitboxSize * 0.7, CFrame.new(0.5, 0.5, -0.5))
-    end
-    
-    if Settings.UseBody then
-        hitboxes["Chest"] = createProtectionHitbox("Chest", Settings.HitboxSize, CFrame.new(0, 0, -1))
-        hitboxes["Head"] = createProtectionHitbox("Head", Settings.HitboxSize * 0.8, CFrame.new(0, 1.5, -0.5))
-    end
-    
-    -- Перемещаем в контейнер
-    for _, hb in pairs(hitboxes) do
-        hb.Parent = container
-    end
-    
-    return container, hitboxes
-end
+local enabled = true
+ToggleBtn.MouseButton1Click:Connect(function()
+    enabled = not enabled
+    ToggleBtn.BackgroundColor3 = enabled and Color3.fromRGB(0, 150, 50) or Color3.fromRGB(100, 50, 0)
+end)
 
-local hitboxContainer, hitboxes = setupHitboxes()
-
--- ========= BALL DETECTION =========
-local function getBall()
-    return workspace:FindFirstChild("ball") or workspace:FindFirstChild("TouchBall")
-end
-
-local function detectBallInHands()
-    local ball = getBall()
-    if not ball then return false end
-    
-    local char = lp.Character
-    if not char then return false end
-    
-    local rightHand = char:FindFirstChild("RightHand") or char:FindFirstChild("RightPalm")
-    local leftHand = char:FindFirstChild("LeftHand") or char:FindFirstChild("LeftPalm")
-    
-    -- Проверяем расстояние до рук (мяч в руках)
-    if rightHand and (ball.Position - rightHand.Position).Magnitude < 3 then
-        return true
-    end
-    if leftHand and (ball.Position - leftHand.Position).Magnitude < 3 then
-        return true
-    end
-    
-    return false
-end
-
--- ========= MAIN PROTECTION LOOP =========
+-- ОСНОВНОЙ ЦИКЛ - ИДЕАЛЬНАЯ ЗАЩИТА
 RunService.Heartbeat:Connect(function()
-    if not Settings.Enabled then return end
+    if not enabled then 
+        sphere.Transparency = 1 
+        return 
+    end
     
     local char = lp.Character
     local root = char and char:FindFirstChild("HumanoidRootPart")
     if not root then return end
     
-    local ball = getBall()
-    if not ball or not ball:IsA("BasePart") then return end
-    
-    -- Проверяем, держит ли игрок мяч
-    holdingBall = detectBallInHands()
-    
-    if holdingBall then
-        -- Если держим мяч - замораживаем его относительно рук
-        local rightHand = char:FindFirstChild("RightHand") or char:FindFirstChild("RightPalm")
-        if rightHand then
-            ball.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
-            ball.AssemblyAngularVelocity = Vector3.new(0, 0, 0)
-            ball.CFrame = rightHand.CFrame * CFrame.new(0, 0, 0.5)
+    -- ПОСТОЯННО ОТСЛЕЖИВАЕМ ВСЕ МЯЧИ
+    local balls = {}
+    for _, obj in pairs(workspace:GetChildren()) do
+        if (obj.Name == "ball" or obj.Name == "TouchBall") and obj:IsA("BasePart") then
+            table.insert(balls, obj)
         end
-        return
     end
     
-    -- Обновляем позицию хитбоксов
-    for _, hitbox in pairs(hitboxContainer:GetChildren()) do
-        if hitbox:IsA("BasePart") then
-            -- Рассчитываем смещение в зависимости от имени
-            local offset = CFrame.new(0, 0, 0)
-            if hitbox.Name == "LeftHand" then
-                offset = CFrame.new(-0.5, 0.5, -0.5)
-            elseif hitbox.Name == "RightHand" then
-                offset = CFrame.new(0.5, 0.5, -0.5)
-            elseif hitbox.Name == "Chest" then
-                offset = CFrame.new(0, 0, -1)
-            elseif hitbox.Name == "Head" then
-                offset = CFrame.new(0, 1.5, -0.5)
-            end
+    -- ПОЗИЦИОНИРУЕМ ЩИТ ПЕРЕД ВРАТАРЁМ
+    sphere.CFrame = root.CFrame * CFrame.new(0, 0, -Settings.Size/3)
+    sphere.Size = Vector3.new(Settings.Size, Settings.Size, Settings.Size)
+    sphere.Transparency = 0.4
+    
+    -- ПРОВЕРЯЕМ КАЖДЫЙ МЯЧ
+    for _, ball in pairs(balls) do
+        if ball and ball.Parent then
+            local distance = (ball.Position - sphere.Position).Magnitude
+            local radius = Settings.Size / 2
             
-            hitbox.CFrame = root.CFrame * offset
-            
-            -- Проверяем столкновение с мячом
-            local distance = (ball.Position - hitbox.Position).Magnitude
-            local hitboxRadius = hitbox.Size.X / 2
-            
-            if distance < hitboxRadius + 1 then
-                -- Мяч коснулся хитбокса - отражаем его
-                local direction = (ball.Position - hitbox.Position).Unit
+            -- ЕСЛИ МЯЧ В ЗОНЕ ЩИТА ИЛИ ЛЕТИТ В НАС
+            if distance <= radius + 3 or 
+               (Settings.Predict and 
+                (ball.Position - sphere.Position).Magnitude < radius * 2 and 
+                ball.AssemblyLinearVelocity.Magnitude > 10) then
+                
+                -- ТОЧНЫЙ РАСчёт ОТСКОКА
+                local normal = (ball.Position - sphere.Position).Unit
                 local speed = ball.AssemblyLinearVelocity.Magnitude
+                local reflectSpeed = math.max(speed, 40) * 1.5
                 
-                -- Если мяч летит слишком медленно - добавляем силу
-                if speed < 30 then speed = 30 end
-                
-                ball.AssemblyLinearVelocity = direction * speed * Settings.ReflectPower
+                -- ОТРАЖАЕМ МЯЧ ОТ КРАЯ ЩИТА
+                ball.AssemblyLinearVelocity = normal * reflectSpeed + Vector3.new(0, 15, 0)
+                ball.AssemblyAngularVelocity = Vector3.new(math.random(-50,50), math.random(-50,50), math.random(-50,50))
             end
         end
     end
 end)
 
--- ========= UI SYSTEM =========
-if game.CoreGui:FindFirstChild("GoalkeeperUI") then
-    game.CoreGui.GoalkeeperUI:Destroy()
-end
-
-local ScreenGui = Instance.new("ScreenGui")
-ScreenGui.Name = "GoalkeeperUI"
-ScreenGui.Parent = game.CoreGui
-
--- Mini Toggle Button
-local ToggleBtn = Instance.new("TextButton")
-ToggleBtn.Parent = ScreenGui
-ToggleBtn.Size = UDim2.fromOffset(60, 60)
-ToggleBtn.Position = UDim2.new(0, 15, 0.5, -30)
-ToggleBtn.BackgroundColor3 = Color3.fromRGB(30, 30, 35)
-ToggleBtn.TextColor3 = Color3.fromRGB(0, 200, 255)
-ToggleBtn.Text = "🥅"
-ToggleBtn.TextSize = 28
-ToggleBtn.Font = Enum.Font.GothamBold
-ToggleBtn.BorderSizePixel = 0
-Instance.new("UICorner", ToggleBtn).CornerRadius = UDim.new(0, 15)
-Instance.new("UIStroke", ToggleBtn).Color = Color3.fromRGB(0, 200, 255)
-Instance.new("UIStroke", ToggleBtn).Thickness = 2
-
--- Main Panel
-local MainFrame = Instance.new("Frame")
-MainFrame.Parent = ScreenGui
-MainFrame.Size = UDim2.fromOffset(280, 380)
-MainFrame.Position = UDim2.new(0.5, -140, 0.5, -190)
-MainFrame.BackgroundColor3 = Color3.fromRGB(15, 15, 20)
-MainFrame.BorderSizePixel = 0
-MainFrame.Visible = false
-Instance.new("UICorner", MainFrame).CornerRadius = UDim.new(0, 20)
-Instance.new("UIStroke", MainFrame).Color = Color3.fromRGB(0, 150, 200)
-Instance.new("UIStroke", MainFrame).Thickness = 2
-
--- Dragging
-local dragging, dragStart, startPos
-MainFrame.InputBegan:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-        dragging = true
-        dragStart = input.Position
-        startPos = MainFrame.Position
-    end
-end)
-
-MainFrame.InputEnded:Connect(function() dragging = false end)
-
-UserInputService.InputChanged:Connect(function(input)
-    if dragging and dragStart then
-        local delta = input.Position - dragStart
-        MainFrame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
-    end
-end)
-
--- Title
-local Title = Instance.new("TextLabel", MainFrame)
-Title.Size = UDim2.new(1, -40, 0, 50)
-Title.Position = UDim2.new(0, 20, 0, 10)
-Title.BackgroundTransparency = 1
-Title.Text = "🥅 GOALKEEPER\nPROTECTION"
-Title.Font = Enum.Font.GothamBlack
-Title.TextColor3 = Color3.fromRGB(0, 200, 255)
-Title.TextSize = 18
-
--- Close Button
-local CloseBtn = Instance.new("TextButton", MainFrame)
-CloseBtn.Size = UDim2.fromOffset(35, 35)
-CloseBtn.Position = UDim2.new(1, -40, 0, 10)
-CloseBtn.BackgroundTransparency = 0.2
-CloseBtn.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
-CloseBtn.Text = "✕"
-CloseBtn.TextColor3 = Color3.new(1, 1, 1)
-CloseBtn.Font = Enum.Font.GothamBold
-CloseBtn.TextSize = 20
-Instance.new("UICorner", CloseBtn).CornerRadius = UDim.new(0, 8)
-CloseBtn.MouseButton1Click:Connect(function() MainFrame.Visible = false ToggleBtn.Visible = true end)
-ToggleBtn.MouseButton1Click:Connect(function() MainFrame.Visible = true ToggleBtn.Visible = false end)
-
--- Status Label
-local StatusLabel = Instance.new("TextLabel", MainFrame)
-StatusLabel.Position = UDim2.new(0, 20, 0, 70)
-StatusLabel.Size = UDim2.new(1, -40, 0, 30)
-StatusLabel.BackgroundTransparency = 1
-StatusLabel.Font = Enum.Font.Gotham
-StatusLabel.TextSize = 14
-StatusLabel.TextColor3 = Color3.fromRGB(100, 255, 100)
-StatusLabel.TextXAlignment = Enum.TextXAlignment.Left
-
--- Main Enable Toggle
-local EnableToggle = Instance.new("TextButton", MainFrame)
-EnableToggle.Size = UDim2.new(1, -40, 0, 50)
-EnableToggle.Position = UDim2.new(0, 20, 0, 110)
-EnableToggle.Font = Enum.Font.GothamBold
-EnableToggle.TextSize = 16
-EnableToggle.TextColor3 = Color3.new(1, 1, 1)
-EnableToggle.BackgroundColor3 = Color3.fromRGB(0, 180, 100)
-Instance.new("UICorner", EnableToggle).CornerRadius = UDim.new(0, 10)
-
-EnableToggle.MouseButton1Click:Connect(function()
-    Settings.Enabled = not Settings.Enabled
-    EnableToggle.BackgroundColor3 = Settings.Enabled and Color3.fromRGB(0, 180, 100) or Color3.fromRGB(100, 100, 100)
-    EnableToggle.Text = Settings.Enabled and "✓ PROTECTION: ON" or "✗ PROTECTION: OFF"
-end)
-
-EnableToggle.Text = "✓ PROTECTION: ON"
-
--- Hand Protection Toggle
-local HandToggle = Instance.new("TextButton", MainFrame)
-HandToggle.Size = UDim2.new(0.5, -12, 0, 40)
-HandToggle.Position = UDim2.new(0, 20, 0, 175)
-HandToggle.Font = Enum.Font.GothamBold
-HandToggle.TextSize = 12
-HandToggle.TextColor3 = Color3.new(1, 1, 1)
-HandToggle.BackgroundColor3 = Color3.fromRGB(0, 150, 200)
-Instance.new("UICorner", HandToggle).CornerRadius = UDim.new(0, 8)
-HandToggle.Text = "🖐️ HANDS: ON"
-
-HandToggle.MouseButton1Click:Connect(function()
-    Settings.UseHands = not Settings.UseHands
-    HandToggle.BackgroundColor3 = Settings.UseHands and Color3.fromRGB(0, 150, 200) or Color3.fromRGB(100, 100, 100)
-    HandToggle.Text = Settings.UseHands and "🖐️ HANDS: ON" or "🖐️ HANDS: OFF"
-end)
-
--- Body Protection Toggle
-local BodyToggle = Instance.new("TextButton", MainFrame)
-BodyToggle.Size = UDim2.new(0.5, -12, 0, 40)
-BodyToggle.Position = UDim2.new(0.5, 8, 0, 175)
-BodyToggle.Font = Enum.Font.GothamBold
-BodyToggle.TextSize = 12
-BodyToggle.TextColor3 = Color3.new(1, 1, 1)
-BodyToggle.BackgroundColor3 = Color3.fromRGB(0, 150, 200)
-Instance.new("UICorner", BodyToggle).CornerRadius = UDim.new(0, 8)
-BodyToggle.Text = "👤 BODY: ON"
-
-BodyToggle.MouseButton1Click:Connect(function()
-    Settings.UseBody = not Settings.UseBody
-    BodyToggle.BackgroundColor3 = Settings.UseBody and Color3.fromRGB(0, 150, 200) or Color3.fromRGB(100, 100, 100)
-    BodyToggle.Text = Settings.UseBody and "👤 BODY: ON" or "👤 BODY: OFF"
-end)
-
--- Reflect Power Label
-local PowerLabel = Instance.new("TextLabel", MainFrame)
-PowerLabel.Position = UDim2.new(0, 20, 0, 230)
-PowerLabel.Size = UDim2.new(1, -40, 0, 20)
-PowerLabel.BackgroundTransparency = 1
-PowerLabel.Text = "REFLECT POWER: " .. tostring(Settings.ReflectPower)
-PowerLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
-PowerLabel.Font = Enum.Font.Gotham
-PowerLabel.TextSize = 12
-PowerLabel.TextXAlignment = Enum.TextXAlignment.Left
-
--- Power Slider
-local PowerSlider = Instance.new("TextButton", MainFrame)
-PowerSlider.Name = "PowerSlider"
-PowerSlider.Text = ""
-PowerSlider.AutoButtonColor = false
-PowerSlider.Position = UDim2.new(0, 20, 0, 255)
-PowerSlider.Size = UDim2.new(1, -40, 0, 24)
-PowerSlider.BackgroundColor3 = Color3.fromRGB(50, 50, 60)
-Instance.new("UICorner", PowerSlider).CornerRadius = UDim.new(1, 0)
-
-local PowerFill = Instance.new("Frame", PowerSlider)
-PowerFill.Size = UDim2.new(Settings.ReflectPower / 2, 0, 1, 0)
-PowerFill.BackgroundColor3 = Color3.fromRGB(255, 150, 0)
-Instance.new("UICorner", PowerFill).CornerRadius = UDim.new(1, 0)
-
-local draggingPower = false
-local function updatePower(input)
-    local relativeX = math.clamp(input.Position.X - PowerSlider.AbsolutePosition.X, 0, PowerSlider.AbsoluteSize.X)
-    local scale = relativeX / PowerSlider.AbsoluteSize.X
-    Settings.ReflectPower = math.max(0.5, scale * 2)
-    Settings.ReflectPower = math.floor(Settings.ReflectPower * 10) / 10
-    PowerFill.Size = UDim2.new(Settings.ReflectPower / 2, 0, 1, 0)
-    PowerLabel.Text = "REFLECT POWER: " .. tostring(Settings.ReflectPower)
-end
-
-PowerSlider.InputBegan:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-        draggingPower = true
-        updatePower(input)
-    end
-end)
-
-PowerSlider.InputEnded:Connect(function() draggingPower = false end)
-
-UserInputService.InputChanged:Connect(function(input)
-    if draggingPower then updatePower(input) end
-end)
-
--- Hitbox Size Label
-local SizeLabel = Instance.new("TextLabel", MainFrame)
-SizeLabel.Position = UDim2.new(0, 20, 0, 295)
-SizeLabel.Size = UDim2.new(1, -40, 0, 20)
-SizeLabel.BackgroundTransparency = 1
-SizeLabel.Text = "HITBOX SIZE: " .. Settings.HitboxSize
-SizeLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
-SizeLabel.Font = Enum.Font.Gotham
-SizeLabel.TextSize = 12
-SizeLabel.TextXAlignment = Enum.TextXAlignment.Left
-
--- Size Slider
-local SizeSlider = Instance.new("TextButton", MainFrame)
-SizeSlider.Name = "SizeSlider"
-SizeSlider.Text = ""
-SizeSlider.AutoButtonColor = false
-SizeSlider.Position = UDim2.new(0, 20, 0, 320)
-SizeSlider.Size = UDim2.new(1, -40, 0, 24)
-SizeSlider.BackgroundColor3 = Color3.fromRGB(50, 50, 60)
-Instance.new("UICorner", SizeSlider).CornerRadius = UDim.new(1, 0)
-
-local SizeFill = Instance.new("Frame", SizeSlider)
-SizeFill.Size = UDim2.new(Settings.HitboxSize / Settings.MaxHitboxSize, 0, 1, 0)
-SizeFill.BackgroundColor3 = Color3.fromRGB(0, 200, 255)
-Instance.new("UICorner", SizeFill).CornerRadius = UDim.new(1, 0)
-
-local draggingSize = false
-local function updateSize(input)
-    local relativeX = math.clamp(input.Position.X - SizeSlider.AbsolutePosition.X, 0, SizeSlider.AbsoluteSize.X)
-    local scale = relativeX / SizeSlider.AbsoluteSize.X
-    Settings.HitboxSize = math.max(8, math.floor(scale * Settings.MaxHitboxSize))
-    SizeFill.Size = UDim2.new(Settings.HitboxSize / Settings.MaxHitboxSize, 0, 1, 0)
-    SizeLabel.Text = "HITBOX SIZE: " .. Settings.HitboxSize
-    
-    -- Пересоздаём хитбоксы
-    hitboxContainer:Destroy()
-    hitboxContainer, hitboxes = setupHitboxes()
-end
-
-SizeSlider.InputBegan:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-        draggingSize = true
-        updateSize(input)
-    end
-end)
-
-SizeSlider.InputEnded:Connect(function() draggingSize = false end)
-
-UserInputService.InputChanged:Connect(function(input)
-    if draggingSize then updateSize(input) end
-end)
-
--- Status Updates
-RunService.Heartbeat:Connect(function()
-    if holdingBall then
-        StatusLabel.Text = "🤲 HOLDING BALL"
-        StatusLabel.TextColor3 = Color3.fromRGB(255, 200, 0)
-    elseif Settings.Enabled then
-        StatusLabel.Text = "🛡️ PROTECTING"
-        StatusLabel.TextColor3 = Color3.fromRGB(100, 255, 100)
-    else
-        StatusLabel.Text = "⚠️ DISABLED"
-        StatusLabel.TextColor3 = Color3.fromRGB(255, 100, 100)
-    end
-end)
-
-print("✅ GOALKEEPER PROTECTION SYSTEM LOADED!")
-print("🥅 Защита вратаря активна! Мяч не пройдёт!")
-
+print("🥅 СУПЕР ВРАТАРЬ АКТИВЕН! Мяч НЕ ПРОЙДЁТ!")
