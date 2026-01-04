@@ -1,160 +1,157 @@
--- GOALKEEPER DEFENSE ZONE SYSTEM v2.0 (No-Lag Edition)
--- Optimized for smooth movement and instant reaction
+-- ULTIMATE GOALKEEPER DEFENSE (BRUTE FORCE EDITION)
+-- Максимальная агрессия к любым незакрепленным объектам
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local Workspace = game:GetService("Workspace")
 local lp = Players.LocalPlayer
 
--- CONFIGURATION
+-- CONFIG
 local Config = {
-    ZoneRadius = 30,         -- Радиус зоны защиты (стадов)
-    RepulsionForce = 300,    -- Сила отталкивания
-    UpwardForce = 50,        -- Сила подбрасывания вверх (чтобы мяч не катился, а летел)
-    UpdateRate = 0.015,      -- Скорость обновления (чем меньше, тем быстрее реакция)
-    VisualizationEnabled = true
+    Radius = 25,             -- Радиус защиты
+    Power = 800,             -- Сила удара (чем больше, тем быстрее улетит)
+    UpForce = 100,           -- Подбрасывание вверх
+    AggressiveMode = true,   -- Если True, отталкивает ВСЕ незакрепленные детали (кроме тебя)
+    Debug = false            -- Писать в консоль, что нашли
 }
 
--- UI SETUP
-local GUI = Instance.new("ScreenGui")
-GUI.Name = "DefenseZoneV2"
-GUI.ResetOnSpawn = false
-GUI.Parent = game.CoreGui
+-- GUI
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Parent = game.CoreGui
+ScreenGui.Name = "ULTIMATE_DEFENSE"
+ScreenGui.ResetOnSpawn = false
 
-local Toggle = Instance.new("TextButton")
-Toggle.Parent = GUI
-Toggle.Size = UDim2.fromOffset(60, 60)
-Toggle.Position = UDim2.new(0, 20, 0.5, -30)
-Toggle.BackgroundColor3 = Color3.fromRGB(0, 170, 255)
-Toggle.TextColor3 = Color3.new(1, 1, 1)
-Toggle.Text = "ON"
-Toggle.TextSize = 18
-Toggle.Font = Enum.Font.GothamBlack
-local corner = Instance.new("UICorner", Toggle)
-corner.CornerRadius = UDim.new(1, 0) -- Круглая кнопка
+local Button = Instance.new("TextButton")
+Button.Parent = ScreenGui
+Button.Size = UDim2.new(0, 150, 0, 50)
+Button.Position = UDim2.new(0.5, -75, 0, 10)
+Button.Text = "🛡️ SHIELD: ON"
+Button.BackgroundColor3 = Color3.fromRGB(0, 255, 100)
+Button.TextColor3 = Color3.new(0,0,0)
+Button.Font = Enum.Font.GothamBold
+Button.TextSize = 18
+local Corner = Instance.new("UICorner", Button)
+Corner.CornerRadius = UDim.new(0, 8)
 
-local SystemActive = true
-
-Toggle.MouseButton1Click:Connect(function()
-    SystemActive = not SystemActive
-    Toggle.BackgroundColor3 = SystemActive and Color3.fromRGB(0, 170, 255) or Color3.fromRGB(200, 50, 50)
-    Toggle.Text = SystemActive and "ON" or "OFF"
+local Enabled = true
+Button.MouseButton1Click:Connect(function()
+    Enabled = not Enabled
+    Button.Text = Enabled and "🛡️ SHIELD: ON" or "🛡️ SHIELD: OFF"
+    Button.BackgroundColor3 = Enabled and Color3.fromRGB(0, 255, 100) or Color3.fromRGB(255, 50, 50)
 end)
 
--- VISUALIZATION
-local ZoneVisual = Instance.new("Part")
-ZoneVisual.Name = "DefenseField"
-ZoneVisual.Shape = Enum.PartType.Ball
-ZoneVisual.Material = Enum.Material.ForceField
-ZoneVisual.Color = Color3.fromRGB(0, 170, 255)
-ZoneVisual.Transparency = 0.85
-ZoneVisual.CanCollide = false
-ZoneVisual.Anchored = true
-ZoneVisual.CastShadow = false
-ZoneVisual.Massless = true
-ZoneVisual.Parent = Workspace
+-- VISUAL ZONE
+local Visual = Instance.new("Part")
+Visual.Shape = Enum.PartType.Ball
+Visual.Material = Enum.Material.ForceField
+Visual.CanCollide = false
+Visual.Anchored = true
+Visual.CastShadow = false
+Visual.Transparency = 0.8
+Visual.Color = Color3.fromRGB(255, 0, 0)
+Visual.Size = Vector3.new(0,0,0)
+Visual.Parent = Workspace
 
--- PHYSICS LOGIC
-local OverlapParams = OverlapParams.new()
-OverlapParams.FilterType = Enum.RaycastFilterType.Exclude
-OverlapParams.FilterDescendantsInstances = {lp.Character} -- Игнорируем себя
-
-local function IsBall(part)
-    if not part then return false end
-    local name = string.lower(part.Name)
-    -- Простой список слов для определения мяча
-    return string.find(name, "ball") or 
-           string.find(name, "soccer") or 
-           string.find(name, "football") or
-           string.find(name, "puck") or
-           part:GetAttribute("IsBall") == true
+-- ФИЛЬТРЫ (ЧТО НЕ ТРОГАТЬ)
+local function IsIgnored(part)
+    if not part then return true end
+    if part.Anchored then return true end -- Стены не трогаем
+    if part.Mass > 1000 then return true end -- Огромные объекты не трогаем
+    if part:IsDescendantOf(lp.Character) then return true end -- Себя не трогаем
+    return false
 end
 
-local function PulseVisual()
-    if not Config.VisualizationEnabled then return end
-    ZoneVisual.Color = Color3.fromRGB(255, 100, 100)
-    ZoneVisual.Transparency = 0.6
-    task.delay(0.1, function()
-        ZoneVisual.Color = Color3.fromRGB(0, 170, 255)
-        ZoneVisual.Transparency = 0.85
-    end)
-end
-
-local function Repulse(ball, rootPos)
-    -- Владение физикой (Network Ownership)
-    -- Пытаемся установить скорость, даже если сервер "держит" мяч
+-- ПРОВЕРКА НА МЯЧ (МАКСИМАЛЬНАЯ)
+local function IsLikelyBall(part)
+    local name = part.Name:lower()
+    local parentName = part.Parent.Name:lower()
     
-    local ballPos = ball.Position
-    local direction = (ballPos - rootPos).Unit
-    
-    -- Вектор отталкивания: От игрока + немного вверх
-    local forceVector = (direction + Vector3.new(0, 0.2, 0)).Unit * Config.RepulsionForce
-    
-    -- Если мяч летит В НАС с большой скоростью, отражаем эту скорость обратно
-    local currentVel = ball.AssemblyLinearVelocity
-    if currentVel.Magnitude > 10 then
-        -- Инвертируем скорость мяча и добавляем нашу силу
-        ball.AssemblyLinearVelocity = (currentVel * -0.5) + forceVector
-    else
-        -- Если мяч стоит или еле катится, просто пинаем
-        ball.AssemblyLinearVelocity = forceVector + Vector3.new(0, Config.UpwardForce, 0)
+    -- 1. Проверка по имени (самая точная)
+    if name:find("ball") or name:find("soccer") or name:find("sport") or name:find("project") or 
+       parentName:find("ball") or parentName:find("soccer") then
+        return true
     end
     
-    -- Добавляем вращение для реалистичности
-    ball.AssemblyAngularVelocity = Vector3.new(math.random(-50,50), math.random(-50,50), math.random(-50,50))
+    -- 2. Проверка по форме
+    if part.Shape == Enum.PartType.Ball or part.Shape == Enum.PartType.Cylinder then
+        return true
+    end
     
-    PulseVisual()
+    -- 3. Проверка MeshPart (часто мячи это меши)
+    if part:IsA("MeshPart") then
+        -- Если это меш и он маленький, скорее всего мяч
+        if part.Size.Magnitude < 6 then 
+            return true 
+        end
+    end
+
+    -- 4. АГРЕССИВНЫЙ РЕЖИМ: Если деталь маленькая и подвижная - БЕЙ ЕЁ
+    if Config.AggressiveMode then
+        if part.Size.Magnitude < 8 then -- Любой объект меньше 8 стадов
+            return true
+        end
+    end
+    
+    return false
 end
 
--- MAIN LOOP
-local lastCheck = 0
-
+-- ОСНОВНОЙ ЦИКЛ (Heartbeat для физики)
 RunService.Heartbeat:Connect(function()
-    -- Получаем персонажа
-    local char = lp.Character
-    local root = char and char:FindFirstChild("HumanoidRootPart")
-    
-    if not root then 
-        ZoneVisual.Transparency = 1 
+    if not lp.Character or not lp.Character:FindFirstChild("HumanoidRootPart") then 
+        Visual.Transparency = 1
         return 
     end
-
-    -- Обновляем визуал зоны
-    ZoneVisual.Size = Vector3.new(Config.ZoneRadius * 2, Config.ZoneRadius * 2, Config.ZoneRadius * 2)
-    ZoneVisual.CFrame = root.CFrame
-    ZoneVisual.Transparency = SystemActive and 0.85 or 1
     
-    if not SystemActive then return end
-
-    -- Ограничение частоты обновлений (для FPS)
-    local now = tick()
-    if now - lastCheck < Config.UpdateRate then return end
-    lastCheck = now
+    local Root = lp.Character.HumanoidRootPart
     
-    -- Обновляем список исключений (чтобы не отталкивать себя)
-    OverlapParams.FilterDescendantsInstances = {char, ZoneVisual}
-
-    -- МГНОВЕННЫЙ ПОИСК ДЕТАЛЕЙ ВОКРУГ
-    local partsInZone = Workspace:GetPartBoundsInRadius(root.Position, Config.ZoneRadius, OverlapParams)
+    -- Обновляем визуал
+    Visual.CFrame = Root.CFrame
+    Visual.Size = Vector3.new(Config.Radius*2, Config.Radius*2, Config.Radius*2)
+    Visual.Transparency = Enabled and 0.8 or 1
     
-    for _, part in ipairs(partsInZone) do
-        -- Проверка: это физический объект? это не закреплено? это мяч?
-        if part:IsA("BasePart") and not part.Anchored and IsBall(part) then
-            -- Дополнительная проверка дистанции (на всякий случай)
-            if (part.Position - root.Position).Magnitude <= Config.ZoneRadius then
-                Repulse(part, root.Position)
+    if not Enabled then return end
+    
+    -- ПОИСК МЯЧА (В РАДИУСЕ)
+    local Params = OverlapParams.new()
+    Params.FilterDescendantsInstances = {lp.Character, Visual}
+    Params.FilterType = Enum.RaycastFilterType.Exclude
+    
+    local parts = Workspace:GetPartBoundsInRadius(Root.Position, Config.Radius, Params)
+    
+    for _, part in ipairs(parts) do
+        if not IsIgnored(part) and IsLikelyBall(part) then
+            
+            -- ВЕКТОР ОТТАЛКИВАНИЯ
+            local direction = (part.Position - Root.Position).Unit
+            
+            -- ЕСЛИ МЯЧ СЛИШКОМ БЛИЗКО - УСИЛИТЬ УДАР
+            local dist = (part.Position - Root.Position).Magnitude
+            local panicMultiplier = (dist < 10) and 1.5 or 1
+            
+            -- УСТАНОВКА СКОРОСТИ (PHYSICS)
+            local force = direction * Config.Power * panicMultiplier
+            part.AssemblyLinearVelocity = force + Vector3.new(0, Config.UpForce, 0)
+            
+            -- ВРАЩЕНИЕ (чтобы сбить скрипты мяча)
+            part.AssemblyAngularVelocity = Vector3.new(100, 100, 100)
+            
+            -- ВИРТУАЛЬНОЕ КАСАНИЕ (Для мячей, работающих от Touch)
+            if part:IsA("BasePart") then
+                firetouchinterest(Root, part, 0) -- Касание
+                firetouchinterest(Root, part, 1) -- Отпускание
             end
+            
+            -- Эффект при ударе
+            Visual.Color = Color3.fromRGB(255, 255, 0)
+        else
+            Visual.Color = Color3.fromRGB(255, 0, 0)
         end
     end
 end)
 
--- CLEANUP
-lp.CharacterRemoving:Connect(function()
-    ZoneVisual.Transparency = 1
-end)
-
+-- Очистка при выходе
 game.Close:Connect(function()
-    ZoneVisual:Destroy()
-    GUI:Destroy()
+    Visual:Destroy()
+    ScreenGui:Destroy()
 end)
 
-print("✅ DEFENSE ZONE V2: MOVEMENT FIXED")
+print("🛡️ ULTRA DEFENSE LOADED - MAX CHECK ENABLED")
