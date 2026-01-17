@@ -1,678 +1,712 @@
---[[
-    ADVANCED GOALKEEPER AI v4.0 - PREDICTIVE SYSTEM
-    Автоматический вратарь с системой предсказания траектории
-    Полностью защищен от анти-читов
-]]
-
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local Workspace = game:GetService("Workspace")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local VirtualInputManager = game:GetService("VirtualInputManager")
-local HttpService = game:GetService("HttpService")
+local LocalPlayer = Players.LocalPlayer
+local ReachDistance = 1
+local IsReachEnabled = false
+local IsVisualizerEnabled = false
+local HitboxSize = Vector3.new(10, 10, 10)
+local ReachConnection = nil
+local Ball = nil
+local RSSHitbox = nil
+getgenv().InfiniteStaminaEnabled = false
 
--- == СИСТЕМА БЕЗОПАСНОСТИ ==
-local Security = {
-    SessionID = HttpService:GenerateGUID(false),
-    LastActivity = tick(),
-    SuspicionLevel = 0,
-    IsSafe = true,
-    
-    Methods = {
-        "InputEmulation",
-        "BehaviorPattern",
-        "NetworkPrediction",
-        "HumanEmulation"
-    },
-    
-    Detectors = {
-        "AntiCheat_A",
-        "FairFight",
-        "VAC_System",
-        "GameGuard"
-    }
-}
+local function CreateHitbox()
+    if RSSHitbox then RSSHitbox:Destroy() end
 
--- == КОНФИГУРАЦИЯ ==
-local Config = {
-    -- Основные настройки
-    Enabled = false,
-    Mode = "AUTO", -- AUTO, SEMI, MANUAL
-    
-    -- Физические параметры
-    JumpPower = {
-        Low = 35,   -- Для низких мячей (X)
-        Normal = 50, -- Стандартный прыжок
-        High = 65,  -- Для высоких мячей (Space)
-        Side = 45   -- Боковые прыжки (E/O)
-    },
-    
-    -- Дистанции
-    DetectionRange = {
-        Close = 15,   -- Ближняя дистанция
-        Medium = 30,  -- Средняя дистанция
-        Far = 50,     -- Дальняя дистанция
-        GoalLine = 25 -- Дистанция от линии ворот
-    },
-    
-    -- Тайминги
-    ReactionTime = {
-        Min = 0.12, -- Минимальное время реакции
-        Max = 0.25, -- Максимальное время реакции
-        HumanDelay = 0.05 -- Имитация задержки человека
-    },
-    
-    -- Предсказание
-    Prediction = {
-        Enabled = true,
-        PingCompensation = 1.2,
-        CurvePrediction = true,
-        Accuracy = 0.85
-    },
-    
-    -- Защита
-    Protection = {
-        MaxSavesPerMinute = 10,
-        CooldownAfterSave = 1.8,
-        RandomMissChance = 0.03,
-        JitterAmount = 0.15
-    }
-}
+    RSSHitbox = Instance.new("BoxHandleAdornment")
+    RSSHitbox.Name = "RSSHitbox"
+    RSSHitbox.AlwaysOnTop = false
+    RSSHitbox.ZIndex = 10
+    RSSHitbox.Color3 = Color3.fromRGB(0, 255, 0)
+    RSSHitbox.Transparency = 1
+    RSSHitbox.Size = HitboxSize
+    RSSHitbox.Adornee = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+    RSSHitbox.Parent = Workspace.Terrain
 
--- == СИСТЕМА ПРЕДСКАЗАНИЯ ==
-local PredictionSystem = {
-    BallHistory = {},
-    PlayerHistory = {},
-    VelocityCache = {},
-    
-    -- Алгоритмы предсказания
-    Algorithms = {
-        "LinearExtrapolation",
-        "QuadraticPrediction",
-        "NeuralApproximation",
-        "VelocityBased"
-    }
-}
-
--- == ИНИЦИАЛИЗАЦИЯ ==
-local Player = Players.LocalPlayer
-local Character = Player.Character or Player.CharacterAdded:Wait()
-local Humanoid = Character:WaitForChild("Humanoid")
-local HumanoidRootPart = Character:WaitForChild("HumanoidRootPart")
-local Camera = workspace.CurrentCamera
-
--- История движений
-local lastPositions = {}
-local lastVelocities = {}
-local saveHistory = {}
-
--- == ОБФУСКАЦИЯ КОДА ==
-local function SafeCall(func, ...)
-    local success, result = pcall(func, ...)
-    if not success then
-        Security.SuspicionLevel = Security.SuspicionLevel + 1
-        return nil
-    end
-    return result
+    local Glow = Instance.new("BoxHandleAdornment")
+    Glow.Name = "Glow"
+    Glow.AlwaysOnTop = true
+    Glow.ZIndex = 0
+    Glow.Color3 = Color3.fromRGB(0, 255, 100)
+    Glow.Transparency = 1
+    Glow.Size = HitboxSize * 1
+    Glow.Parent = RSSHitbox
 end
 
-local function RandomDelay(min, max)
-    local delay = math.random(min * 1000, max * 1000) / 1000
-    task.wait(delay)
-    return delay
+local function UpdateHitbox()
+    if not RSSHitbox then return end
+    
+    RSSHitbox.Size = HitboxSize
+    local Glow = RSSHitbox:FindFirstChild("Glow")
+    if Glow then 
+        Glow.Size = HitboxSize * 1
+    end
+
+    local shouldShow = IsReachEnabled and IsVisualizerEnabled
+    
+    RSSHitbox.Transparency = shouldShow and 1 or 1
+    if Glow then 
+        Glow.Transparency = shouldShow and 0.7 or 1
+    end
 end
 
--- == СИСТЕМА ОБНАРУЖЕНИЯ МЯЧА ==
-local BallTracker = {
-    LastBall = nil,
-    BallInstances = {},
-    DetectionMethods = {}
-}
+local function GetRoot() 
+    return LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+end
 
-function BallTracker:FindBall()
-    -- Метод 1: Поиск по имени
-    local ballNames = {
-        "Ball", "SoccerBall", "Football", 
-        "ball", "Sphere", "GameBall",
-        "MainBall", "TPS_Ball"
-    }
-    
-    for _, name in ipairs(ballNames) do
-        local ball = Workspace:FindFirstChild(name)
-        if ball and ball:IsA("BasePart") then
-            return ball
-        end
-    end
-    
-    -- Метод 2: Поиск по свойствам
-    for _, obj in ipairs(Workspace:GetChildren()) do
-        if obj:IsA("BasePart") and obj.Shape == Enum.PartType.Ball then
-            return obj
-        end
-    end
-    
-    -- Метод 3: Поиск по родительской структуре
-    for _, obj in ipairs(Workspace:GetDescendants()) do
-        if obj:IsA("BasePart") then
-            local parentName = obj.Parent and obj.Parent.Name or ""
-            if parentName:find("Ball") or parentName:find("Soccer") then
-                return obj
+local function FindBall()
+    local b = Workspace:FindFirstChild("ball")
+    if b and b:IsA("BasePart") then return b end
+end
+
+local function ReachLoop()
+    local root = GetRoot()
+    if not root or not RSSHitbox then return end
+
+    RSSHitbox.Adornee = root
+    local Glow = RSSHitbox:FindFirstChild("Glow")
+    if Glow then Glow.Adornee = root end
+
+    local ball = FindBall()
+    if not ball then return end
+
+    local effectiveReach = math.max(HitboxSize.X, HitboxSize.Y, HitboxSize.Z) / 2
+
+    if (ball.Position - root.Position).Magnitude <= effectiveReach then
+        for _, part in LocalPlayer.Character:GetChildren() do
+            if part:IsA("BasePart") then
+                firetouchinterest(part, ball, 0)
+                task.wait()
+                firetouchinterest(part, ball, 1)
             end
         end
     end
-    
-    return nil
 end
 
-function BallTracker:GetBallProperties(ball)
-    if not ball then return nil end
-    
-    return {
-        Position = ball.Position,
-        Velocity = ball.VectorVelocity or ball.AssemblyLinearVelocity,
-        Speed = ball.VectorVelocity and ball.VectorVelocity.Magnitude or 0,
-        LastUpdate = tick()
-    }
+local function EnableReach()
+    if ReachConnection then return end
+    IsReachEnabled = true
+    UpdateHitbox()
+    ReachConnection = RunService.Heartbeat:Connect(ReachLoop)
 end
 
--- == СИСТЕМА ПРЕДСКАЗАНИЯ ТРАЕКТОРИИ ==
-function PredictionSystem:PredictTrajectory(ball, lookAheadTime)
-    if not ball then return nil end
-    
-    local properties = BallTracker:GetBallProperties(ball)
-    if not properties then return nil end
-    
-    -- Сохраняем историю
-    table.insert(self.BallHistory, 1, {
-        position = properties.Position,
-        velocity = properties.Velocity,
-        time = tick()
-    })
-    
-    if #self.BallHistory > 10 then
-        table.remove(self.BallHistory, 11)
+local function DisableReach()
+    if ReachConnection then 
+        ReachConnection:Disconnect() 
+        ReachConnection = nil 
     end
-    
-    -- Предсказание на основе истории
-    if #self.BallHistory >= 3 then
-        local avgVelocity = Vector3.new(0, 0, 0)
-        local count = 0
-        
-        for i = 1, math.min(3, #self.BallHistory) do
-            local data = self.BallHistory[i]
-            avgVelocity = avgVelocity + data.velocity
-            count = count + 1
+    IsReachEnabled = false
+    UpdateHitbox()
+end
+
+local speeds = nil
+local defaultWalk = 16
+
+local function SetupStamina()
+    pcall(function()
+        local gui = LocalPlayer:WaitForChild("PlayerGui", 10)
+        local stamina = gui:WaitForChild("Stamina", 10)
+        local frame = stamina:WaitForChild("Frame", 5)
+        speeds = frame:WaitForChild("Speeds", 5)
+        defaultWalk = speeds.Walk.Value
+
+        if InfiniteStaminaEnabled and speeds then
+            speeds.Walk.Value = speeds.Run.Value
         end
-        
-        avgVelocity = avgVelocity / count
-        
-        -- Учет гравитации
-        local gravity = Vector3.new(0, -workspace.Gravity * 0.5, 0)
-        local predictedPos = properties.Position + 
-                            (avgVelocity * lookAheadTime) + 
-                            (gravity * (lookAheadTime ^ 2))
-        
-        return predictedPos, avgVelocity
-    end
-    
-    -- Простое предсказание
-    return properties.Position + (properties.Velocity * lookAheadTime), 
-           properties.Velocity
+    end)
 end
 
--- == СИСТЕМА ПРИНЯТИЯ РЕШЕНИЙ ==
-local DecisionSystem = {
-    LastDecision = 0,
-    DecisionHistory = {},
-    Confidence = 0.0
-}
+SetupStamina()
+LocalPlayer.CharacterAdded:Connect(function()
+    task.wait(2)
+    SetupStamina()
+end)
 
-function DecisionSystem:ShouldSave(ball, predictedPosition)
-    if not ball or not predictedPosition then
-        return false, 0
-    end
-    
-    -- Проверка времени реакции
-    local timeSinceLastDecision = tick() - self.LastDecision
-    if timeSinceLastDecision < 0.1 then
-        return false, 0
-    end
-    
-    -- Получаем свойства мяча
-    local properties = BallTracker:GetBallProperties(ball)
-    if not properties or properties.Speed < 15 then
-        return false, 0
-    end
-    
-    -- Вычисляем направление к воротам
-    local goalDirection = (HumanoidRootPart.Position - predictedPosition).Unit
-    local ballDirection = properties.Velocity.Unit
-    
-    local dotProduct = goalDirection:Dot(ballDirection)
-    local angleToGoal = math.deg(math.acos(math.clamp(dotProduct, -1, 1)))
-    
-    -- Определяем уверенность
-    local distance = (predictedPosition - HumanoidRootPart.Position).Magnitude
-    local timeToReach = distance / math.max(properties.Speed, 1)
-    
-    local confidence = 0.0
-    
-    -- Факторы уверенности
-    if angleToGoal < 45 then
-        confidence = confidence + 0.4
-    end
-    
-    if distance < Config.DetectionRange.Medium then
-        confidence = confidence + 0.3
-    end
-    
-    if properties.Speed > 25 then
-        confidence = confidence + 0.3
-    end
-    
-    -- Случайный промах для реализма
-    if math.random() < Config.Protection.RandomMissChance then
-        confidence = confidence * 0.5
-    end
-    
-    self.Confidence = confidence
-    self.LastDecision = tick()
-    
-    return confidence > 0.7, confidence
-end
+local WindUI = loadstring(game:HttpGet("https://raw.githubusercontent.com/Footagesus/WindUI/refs/heads/main/dist/main.lua"))()
 
-function DecisionSystem:GetDiveType(ball, predictedPosition)
-    if not ball or not predictedPosition then
-        return "NONE", Vector3.new(0, 0, 0)
-    end
-    
-    local properties = BallTracker:GetBallProperties(ball)
-    local direction = (predictedPosition - HumanoidRootPart.Position).Unit
-    
-    -- Определяем высоту мяча
-    local heightDiff = predictedPosition.Y - HumanoidRootPart.Position.Y
-    local horizontalDist = Vector3.new(predictedPosition.X, 0, predictedPosition.Z) -
-                          Vector3.new(HumanoidRootPart.Position.X, 0, HumanoidRootPart.Position.Z)
-    horizontalDist = horizontalDist.Magnitude
-    
-    -- Определяем тип нырка
-    if heightDiff > 5 then
-        -- Высокий мяч
-        if horizontalDist > 8 then
-            return "SIDE_HIGH", direction * Config.JumpPower.High + Vector3.new(0, 10, 0)
+local Window = WindUI:CreateWindow({
+    Title = "RSS - VETA",
+    Icon = "rbxassetid://106211849494703",
+    Author = "Made By VETA",
+    Folder = "RSSVETA",
+})
+
+local MainTab = Window:Tab({
+    Title = "GK & Player Reach",
+    Icon = "target",
+})
+
+local MainSection = MainTab:Section({
+    Title = "Both Reach (Pretty Bad At GK)"
+})
+
+MainSection:Toggle({
+    Title = "Enable Reach",
+    Default = false,
+    Callback = function(v)
+        if v then
+            EnableReach()
         else
-            return "HIGH", Vector3.new(0, Config.JumpPower.High, 0)
-        end
-    elseif heightDiff < -2 then
-        -- Низкий мяч
-        if horizontalDist > 6 then
-            return "SIDE_LOW", direction * Config.JumpPower.Low
-        else
-            return "LOW", direction * Config.JumpPower.Low
-        end
-    else
-        -- Средний мяч
-        if horizontalDist > 10 then
-            return "SIDE", direction * Config.JumpPower.Side + Vector3.new(0, 5, 0)
-        else
-            return "NORMAL", direction * Config.JumpPower.Normal
+            DisableReach()
         end
     end
-end
+})
 
--- == СИСТЕМА ВЫПОЛНЕНИЯ ДЕЙСТВИЙ ==
-local ActionSystem = {
-    LastAction = 0,
-    ActionQueue = {},
-    KeyMap = {
-        SPACE = Enum.KeyCode.Space,
-        E = Enum.KeyCode.E,
-        Q = Enum.KeyCode.Q,
-        X = Enum.KeyCode.X,
-        C = Enum.KeyCode.C
-    }
-}
+MainSection:Toggle({
+    Title = "Show Hitbox",
+    Default = false,
+    Callback = function(v)
+        IsVisualizerEnabled = v
+        UpdateHitbox()
+    end
+})
 
-function ActionSystem:PerformDive(diveType, forceVector)
-    if tick() - self.LastAction < Config.Protection.CooldownAfterSave then
-        return false
-    end
-    
-    -- Добавляем случайность для реализма
-    local jitter = Vector3.new(
-        (math.random() * 2 - 1) * Config.Protection.JitterAmount,
-        (math.random() * 2 - 1) * Config.Protection.JitterAmount * 0.5,
-        (math.random() * 2 - 1) * Config.Protection.JitterAmount
-    )
-    
-    forceVector = forceVector + jitter
-    
-    -- Эмуляция нажатия клавиш
-    local keysToPress = {}
-    
-    if diveType == "HIGH" then
-        keysToPress = {self.KeyMap.SPACE}
-    elseif diveType == "LOW" then
-        keysToPress = {self.KeyMap.X}
-    elseif diveType == "SIDE" then
-        local sideKey = forceVector.X > 0 and self.KeyMap.E or self.KeyMap.Q
-        keysToPress = {sideKey}
-    elseif diveType == "SIDE_HIGH" then
-        local sideKey = forceVector.X > 0 and self.KeyMap.E or self.KeyMap.Q
-        keysToPress = {sideKey, self.KeyMap.SPACE}
-    elseif diveType == "SIDE_LOW" then
-        local sideKey = forceVector.X > 0 and self.KeyMap.E or self.KeyMap.Q
-        keysToPress = {sideKey, self.KeyMap.X}
-    end
-    
-    -- Нажимаем клавиши
-    for _, key in ipairs(keysToPress) do
-        VirtualInputManager:SendKeyEvent(true, key, false, nil)
-        task.wait(0.02)
-        VirtualInputManager:SendKeyEvent(false, key, false, nil)
-    end
-    
-    -- Применяем физическую силу
-    if HumanoidRootPart and Character.PrimaryPart then
-        HumanoidRootPart.Velocity = forceVector
-        
-        -- Имитация прыжка
-        if diveType:find("HIGH") or diveType == "NORMAL" then
-            Humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
-        end
-    end
-    
-    self.LastAction = tick()
-    table.insert(saveHistory, {
-        time = tick(),
-        type = diveType,
-        confidence = DecisionSystem.Confidence
-    })
-    
-    -- Очищаем старую историю
-    while #saveHistory > 0 and tick() - saveHistory[1].time > 60 do
-        table.remove(saveHistory, 1)
-    end
-    
-    return true
-end
+MainTab:Space()
 
--- == СИСТЕМА МОНИТОРИНГА ==
-local MonitorSystem = {
-    Stats = {
-        TotalSaves = 0,
-        SuccessfulSaves = 0,
-        ReactionTimes = {},
-        AverageReaction = 0
+local SizeSection = MainTab:Section({
+    Title = "Hitbox Size (X/Y/Z)"
+})
+
+SizeSection:Slider({
+    Title = "Size X",
+    Step = 1,
+    Value = {
+        Min = 1,
+        Max = 50,
+        Default = 10,
     },
-    
-    Alerts = {},
-    Warnings = {}
-}
+    Callback = function(v)
+        HitboxSize = Vector3.new(v, HitboxSize.Y, HitboxSize.Z)
+        UpdateHitbox()
+    end
+})
 
-function MonitorSystem:UpdateStats(success, reactionTime)
-    self.Stats.TotalSaves = self.Stats.TotalSaves + 1
-    
-    if success then
-        self.Stats.SuccessfulSaves = self.Stats.SuccessfulSaves + 1
+SizeSection:Slider({
+    Title = "Size Y",
+    Step = 1,
+    Value = {
+        Min = 1,
+        Max = 50,
+        Default = 10,
+    },
+    Callback = function(v)
+        HitboxSize = Vector3.new(HitboxSize.X, v, HitboxSize.Z)
+        UpdateHitbox()
     end
-    
-    table.insert(self.Stats.ReactionTimes, reactionTime)
-    
-    -- Обновляем среднее время реакции
-    local sum = 0
-    for _, rt in ipairs(self.Stats.ReactionTimes) do
-        sum = sum + rt
+})
+
+SizeSection:Slider({
+    Title = "Size Z",
+    Step = 1,
+    Value = {
+        Min = 1,
+        Max = 50,
+        Default = 10,
+    },
+    Callback = function(v)
+        HitboxSize = Vector3.new(HitboxSize.X, HitboxSize.Y, v)
+        UpdateHitbox()
     end
-    self.Stats.AverageReaction = sum / #self.Stats.ReactionTimes
-    
-    -- Ограничиваем историю
-    if #self.Stats.ReactionTimes > 20 then
-        table.remove(self.Stats.ReactionTimes, 1)
-    end
+})
+
+local GkTab = Window:Tab({
+    Title = "GK Features",
+    Icon = "rbxassetid://10734950020"
+})
+
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local LocalPlayer = Players.LocalPlayer
+
+local function isInFansTeam()
+    return LocalPlayer.Team and LocalPlayer.Team.Name == "Fans"
 end
 
-function MonitorSystem:CheckSafety()
-    local currentTime = tick()
-    
-    -- Проверка частоты сейвов
-    if #saveHistory >= Config.Protection.MaxSavesPerMinute then
-        local oldestSave = saveHistory[1].time
-        if currentTime - oldestSave < 60 then
-            table.insert(self.Warnings, {
-                time = currentTime,
-                message = "Превышен лимит сейвов в минуту",
-                level = "HIGH"
+local AutoPickSection = GkTab:Section({
+    Title = "Auto Pick GK"
+})
+
+AutoPickSection:Dropdown({
+    Title = "Choose Team",
+    Desc = "USE THIS WHEN NO GK IN TEAM",
+    Values = {"Home GK", "Away GK"},
+    Value = nil,
+    Multi = false,
+    AllowNone = true,
+    Callback = function(option)
+        if not option or option == "" then
+            return
+        end
+        
+        if not isInFansTeam() then
+            WindUI:Notify({
+                Title = "Error",
+                Icon = "ban",
+                Content = "You must be in Fans/No Team to use this feature!",
+                Duration = 5,
             })
-            return false
+            return
+        end
+        
+        if option == "Home GK" then
+            local args = {
+                BrickColor.new(23),
+                "Goalie"
+            }
+            ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("TeamChange"):FireServer(unpack(args))
+        elseif option == "Away GK" then
+            local args = {
+                BrickColor.new(141),
+                "Goalie"
+            }
+            ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("TeamChange"):FireServer(unpack(args))
         end
     end
-    
-    -- Проверка времени реакции
-    if self.Stats.AverageReaction < Config.ReactionTime.Min then
-        Security.SuspicionLevel = Security.SuspicionLevel + 1
-    end
-    
-    -- Проверка уровня подозрительности
-    if Security.SuspicionLevel > 5 then
-        table.insert(self.Alerts, {
-            time = currentTime,
-            message = "Высокий уровень подозрительности",
-            action = "ENABLE_SAFE_MODE"
-        })
-        Config.Mode = "SAFE"
-    end
-    
-    return Security.SuspicionLevel < 10
-end
+})
 
--- == ИНТЕРФЕЙС ==
-local Interface = {
-    UI = nil,
-    Elements = {},
-    Visible = false
-}
+local DiveSection = GkTab:Section({
+        Title = "Auto Dive"
+    })
 
-function Interface:Create()
-    -- Создаем минималистичный интерфейс
-    local screenGui = Instance.new("ScreenGui")
-    screenGui.Name = "GK_Assistant_" .. Security.SessionID:sub(1, 8)
-    screenGui.Parent = Player:WaitForChild("PlayerGui")
-    
-    -- Основной контейнер
-    local frame = Instance.new("Frame")
-    frame.Size = UDim2.new(0, 200, 0, 150)
-    frame.Position = UDim2.new(0.01, 0, 0.3, 0)
-    frame.BackgroundColor3 = Color3.fromRGB(30, 30, 40)
-    frame.BackgroundTransparency = 0.3
-    frame.Parent = screenGui
-    
-    local corner = Instance.new("UICorner")
-    corner.CornerRadius = UDim.new(0, 8)
-    corner.Parent = frame
-    
-    -- Заголовок
-    local title = Instance.new("TextLabel")
-    title.Size = UDim2.new(1, 0, 0, 30)
-    title.Position = UDim2.new(0, 0, 0, 0)
-    title.Text = "GK ASSISTANT v4.0"
-    title.TextColor3 = Color3.fromRGB(255, 255, 255)
-    title.BackgroundTransparency = 1
-    title.Font = Enum.Font.GothamBold
-    title.TextSize = 16
-    title.Parent = frame
-    
-    -- Статус
-    local status = Instance.new("TextLabel")
-    status.Size = UDim2.new(1, 0, 0, 25)
-    status.Position = UDim2.new(0, 0, 0, 30)
-    status.Text = "Status: DISABLED"
-    status.TextColor3 = Color3.fromRGB(255, 100, 100)
-    status.BackgroundTransparency = 1
-    status.Font = Enum.Font.Gotham
-    status.TextSize = 14
-    status.Parent = frame
-    
-    -- Кнопка включения
-    local toggleBtn = Instance.new("TextButton")
-    toggleBtn.Size = UDim2.new(0.9, 0, 0, 30)
-    toggleBtn.Position = UDim2.new(0.05, 0, 0.4, 0)
-    toggleBtn.Text = "ENABLE AI"
-    toggleBtn.BackgroundColor3 = Color3.fromRGB(60, 180, 80)
-    toggleBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-    toggleBtn.Font = Enum.Font.GothamBold
-    toggleBtn.TextSize = 14
-    toggleBtn.Parent = frame
-    
-    local btnCorner = Instance.new("UICorner")
-    btnCorner.CornerRadius = UDim.new(0, 6)
-    btnCorner.Parent = toggleBtn
-    
-    -- Статистика
-    local statsLabel = Instance.new("TextLabel")
-    statsLabel.Size = UDim2.new(1, 0, 0, 60)
-    statsLabel.Position = UDim2.new(0, 0, 0.65, 0)
-    statsLabel.Text = "Saves: 0\nSuccess: 0%\nReaction: 0ms"
-    statsLabel.TextColor3 = Color3.fromRGB(220, 220, 220)
-    statsLabel.BackgroundTransparency = 1
-    statsLabel.Font = Enum.Font.Gotham
-    statsLabel.TextSize = 12
-    statsLabel.TextXAlignment = Enum.TextXAlignment.Left
-    statsLabel.TextYAlignment = Enum.TextYAlignment.Top
-    statsLabel.Parent = frame
-    
-    -- Сохраняем элементы
-    self.Elements = {
-        MainFrame = frame,
-        StatusLabel = status,
-        ToggleButton = toggleBtn,
-        StatsLabel = statsLabel,
-        ScreenGui = screenGui
-    }
-    
-    -- Обработчики
-    toggleBtn.MouseButton1Click:Connect(function()
-        Config.Enabled = not Config.Enabled
-        if Config.Enabled then
-            status.Text = "Status: ACTIVE"
-            status.TextColor3 = Color3.fromRGB(100, 255, 100)
-            toggleBtn.Text = "DISABLE AI"
-            toggleBtn.BackgroundColor3 = Color3.fromRGB(255, 100, 100)
-        else
-            status.Text = "Status: DISABLED"
-            status.TextColor3 = Color3.fromRGB(255, 100, 100)
-            toggleBtn.Text = "ENABLE AI"
-            toggleBtn.BackgroundColor3 = Color3.fromRGB(60, 180, 80)
+local DiveSection = GkTab:Section({
+    Title = "Auto Dive (Improved)"
+})
+
+local DiveToggle = DiveSection:Toggle({
+    Title = "Auto Dive [PREDICTION]",
+    Desc = "Smart Auto-GK with Velocity Prediction",
+    Default = false,
+    Callback = function(enabled)
+        local Players = game:GetService("Players")
+        local RunService = game:GetService("RunService")
+
+        local LocalPlayer = Players.LocalPlayer
+        local Character = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
+        local HumanoidRootPart = Character:WaitForChild("HumanoidRootPart")
+
+        -- Очистка старого соединения
+        if getgenv().AutoDiveConnection then
+            getgenv().AutoDiveConnection:Disconnect()
+            getgenv().AutoDiveConnection = nil
         end
-    end)
-    
-    -- Обновление статистики
-    spawn(function()
-        while true do
-            task.wait(1)
-            if self.Elements.StatsLabel then
-                local successRate = MonitorSystem.Stats.TotalSaves > 0 and 
-                    (MonitorSystem.Stats.SuccessfulSaves / MonitorSystem.Stats.TotalSaves) * 100 or 0
-                
-                self.Elements.StatsLabel.Text = string.format(
-                    "Saves: %d\nSuccess: %.1f%%\nReaction: %dms",
-                    MonitorSystem.Stats.TotalSaves,
-                    successRate,
-                    math.floor(MonitorSystem.Stats.AverageReaction * 1000)
-                )
+        
+        if not enabled then return end
+
+        -- НАСТРОЙКИ (Можно менять под себя)
+        local DIVE_DISTANCE = 14     -- Увеличил радиус, так как теперь есть предсказание
+        local DIVE_COOLDOWN = 0.8    -- Задержка между прыжками
+        local PREDICTION_TIME = 0.35 -- На сколько секунд вперед смотреть (чем быстрее мяч, тем важнее)
+        local MIN_BALL_SPEED = 10    -- Минимальная скорость мяча для реакции (чтобы не прыгать на медленные)
+
+        local lastDiveTime = 0
+        local leftDiveButton = nil
+        local rightDiveButton = nil
+
+        -- Получаем кнопки (для мобильного управления)
+        local playerGui = LocalPlayer:WaitForChild("PlayerGui")
+        local mobileCTRL = playerGui:WaitForChild("MobileCTRL")
+        local touchControlFrame = mobileCTRL:WaitForChild("TouchControlFrame")
+        local jumpButton = touchControlFrame:WaitForChild("JumpButton")
+        leftDiveButton = jumpButton:WaitForChild("LeftDive")
+        rightDiveButton = jumpButton:WaitForChild("RightDive")
+
+        -- Функция нажатия (имитация клика)
+        local function clickButton(btn)
+            local connections = getconnections(btn.MouseButton1Click)
+            if connections and #connections > 0 then
+                connections[1]:Fire()
+            else
+                btn.MouseButton1Click:Fire()
             end
         end
-    end)
-end
 
--- == ОСНОВНОЙ ЦИКЛ ==
-local MainLoop = {
-    Running = true,
-    LastUpdate = 0,
-    UpdateInterval = 0.033 -- ~30 FPS
-}
-
-function MainLoop:Start()
-    -- Создаем интерфейс
-    Interface:Create()
-    
-    -- Основной цикл обработки
-    while self.Running do
-        local startTime = tick()
-        
-        if Config.Enabled then
-            -- Находим мяч
-            local ball = BallTracker:FindBall()
+        local function autoDive(predictedPos)
+            local currentTime = tick()
             
-            if ball then
-                -- Предсказываем траекторию
-                local lookAhead = Config.ReactionTime.Min + 
-                                 (Player:GetNetworkPing() * Config.Prediction.PingCompensation)
+            if currentTime - lastDiveTime < DIVE_COOLDOWN then return end
+            
+            -- Определяем сторону прыжка относительно взгляда игрока
+            local playerCFrame = HumanoidRootPart.CFrame
+            local localBallPos = playerCFrame:PointToObjectSpace(predictedPos)
+            
+            -- Логика направления
+            if localBallPos.X < -1 then -- Левее центра
+                clickButton(leftDiveButton)
+                lastDiveTime = currentTime
+            elseif localBallPos.X > 1 then -- Правее центра
+                clickButton(rightDiveButton)
+                lastDiveTime = currentTime
+            -- Если мяч летит прямо в центр, можно добавить прыжок вверх или стоять (опционально)
+            end
+        end
+
+        getgenv().AutoDiveConnection = RunService.Heartbeat:Connect(function()
+            -- Ищем мяч (проверяем разные имена, как в оригинале)
+            local ball = workspace:FindFirstChild("ball") or workspace:FindFirstChild("TPS") or workspace:FindFirstChild("PSoccerBall")
+            if not ball then return end
+            
+            -- Проверка скорости мяча
+            local velocity = ball.AssemblyLinearVelocity
+            if velocity.Magnitude < MIN_BALL_SPEED then return end -- Игнорируем медленные мячи
+
+            -- Предсказание позиции: Позиция + (Скорость * Время)
+            local predictedPosition = ball.Position + (velocity * PREDICTION_TIME)
+            
+            -- Считаем дистанцию до ПРЕДСКАЗАННОЙ точки, а не текущей
+            local distance = (HumanoidRootPart.Position - predictedPosition).Magnitude
+            
+            -- Проверяем, летит ли мяч в нашу сторону (простая проверка дистанции)
+            -- Если предсказанная точка ближе, чем текущая - значит мяч летит К НАМ
+            local currentDist = (HumanoidRootPart.Position - ball.Position).Magnitude
+            
+            if distance <= DIVE_DISTANCE and distance < currentDist then
+                autoDive(predictedPosition)
+            end
+        end)
+    end
+})
+
+local StaminaTab = Window:Tab({
+    Title = "Infinite Stamina",
+    Icon = "zap",
+})
+
+local StaminaSection = StaminaTab:Section({
+    Title = "Infinite Stamina"
+})
+
+StaminaSection:Toggle({
+    Title = "Enable Infinite Stamina",
+    Default = false,
+    Callback = function(v)
+        getgenv().InfiniteStaminaEnabled = v
+        if speeds then
+            speeds.Walk.Value = v and speeds.Run.Value or defaultWalk
+        end
+    end
+})
+
+local PredictTab = Window:Tab({
+    Title = "Ball Predictor",
+    Icon = "circle",
+})
+
+local PredictSection = PredictTab:Section({
+    Title = "Ball Predictor"
+})
+
+local predictionConnection = nil
+local curveFolder = nil
+
+PredictSection:Toggle({
+    Title = "Enable Ball Predictor",
+    Default = false,
+    Callback = function(Value)
+        if Value then
+            local Players = game:GetService("Players")
+            local RunService = game:GetService("RunService")
+            local Workspace = game:GetService("Workspace")
+
+            local config = {
+                gravity = 196.2,
+                bounceDamping = 0.68,
+                groundHeight = 0,
+                minBounceVelocity = 8,
+                airResistance = 0.99,
+                frictionCoefficient = 0.85,
+                spinDecay = 0.95,
+                magnusCoefficient = 0.00015,
+                terminalVelocity = 200,
+                rollingResistance = 0.92,
                 
-                local predictedPos, predictedVel = PredictionSystem:PredictTrajectory(ball, lookAhead)
+                segmentCount = 25,
+                segmentSize = Vector3.new(0.3, 0.3, 2),
+                segmentTransparency = 0.2,
+                maxPredictionTime = 10,
+                minVelocityThreshold = 3,
+                simulationTimestep = 0.033,
+                maxSimulationPoints = 80,
+                updateRate = 3,
                 
-                -- Принимаем решение
-                local shouldSave, confidence = DecisionSystem:ShouldSave(ball, predictedPos)
+                colorCurve = Color3.fromRGB(0, 255, 0),
+                colorLanding = Color3.fromRGB(0, 255, 0),
+            }
+
+            local vector3Zero = Vector3.zero
+            local vector3Up = Vector3.new(0, 1, 0)
+            local gravityVector = Vector3.new(0, -config.gravity, 0)
+
+            local cachedBall = nil
+            local lastBallCheck = 0
+            local ballCheckInterval = 1
+
+            local function getBall()
+                local now = tick()
+                if cachedBall and cachedBall.Parent and now - lastBallCheck < ballCheckInterval then
+                    return cachedBall
+                end
                 
-                if shouldSave and MonitorSystem:CheckSafety() then
-                    -- Определяем тип нырка
-                    local diveType, forceVector = DecisionSystem:GetDiveType(ball, predictedPos)
+                lastBallCheck = now
+                cachedBall = Workspace:FindFirstChild("TPS", true) 
+                    or Workspace:FindFirstChild("PSoccerBall", true)
+                    or Workspace:FindFirstChild("ball", true)
+                
+                return cachedBall
+            end
+
+            curveFolder = Instance.new("Folder")
+            curveFolder.Name = "BallPredictionCurve"
+            curveFolder.Parent = workspace
+
+            local segments = table.create(config.segmentCount)
+            for i = 1, config.segmentCount do
+                local segment = Instance.new("Part")
+                segment.Name = "Segment_" .. i
+                segment.Anchored = true
+                segment.CanCollide = false
+                segment.CastShadow = false
+                segment.Material = Enum.Material.Neon
+                segment.Transparency = config.segmentTransparency
+                segment.Size = config.segmentSize
+                segment.Color = config.colorCurve
+                segment.Parent = curveFolder
+                segments[i] = segment
+            end
+
+            local landingMarker = Instance.new("Part")
+            landingMarker.Name = "LandingMarker"
+            landingMarker.Anchored = true
+            landingMarker.CanCollide = false
+            landingMarker.CastShadow = false
+            landingMarker.Material = Enum.Material.Neon
+            landingMarker.Color = config.colorLanding
+            landingMarker.Transparency = 0.4
+            landingMarker.Size = Vector3.new(4, 0.2, 4)
+            landingMarker.Shape = Enum.PartType.Cylinder
+            landingMarker.Parent = curveFolder
+
+            local landingRing = Instance.new("Part")
+            landingRing.Name = "LandingRing"
+            landingRing.Anchored = true
+            landingRing.CanCollide = false
+            landingRing.CastShadow = false
+            landingRing.Material = Enum.Material.Neon
+            landingRing.Color = config.colorLanding
+            landingRing.Transparency = 0.6
+            landingRing.Size = Vector3.new(6, 0.1, 6)
+            landingRing.Shape = Enum.PartType.Cylinder
+            landingRing.Parent = curveFolder
+
+            local function simulateTrajectory(startPos, startVel)
+            local points = table.create(config.maxSimulationPoints)
+                local dt = config.simulationTimestep
+                local maxTime = config.maxPredictionTime
+                local gravityDt = gravityVector * dt
+                local airResistance = config.airResistance ^ dt
+                
+                local pos = startPos
+                local vel = startVel
+                local time = 0
+                local bounceCount = 0
+                local pointCount = 0
+                
+                while time < maxTime and bounceCount < 8 and pointCount < config.maxSimulationPoints do
+                    time = time + dt
+                    pointCount = pointCount + 1
                     
-                    if diveType ~= "NONE" then
-                        -- Выполняем нырок
-                        local success = ActionSystem:PerformDive(diveType, forceVector)
+                    vel = (vel + gravityDt) * airResistance
+                    
+                    if vel.Y < -config.terminalVelocity then
+                        vel = Vector3.new(vel.X, -config.terminalVelocity, vel.Z)
+                    end
+                    
+                    pos = pos + vel * dt
+                    
+                    points[pointCount] = {pos, vel, vel.Magnitude}
+                    
+                    if pos.Y <= config.groundHeight and vel.Y < 0 then
+                        pos = Vector3.new(pos.X, config.groundHeight, pos.Z)
                         
-                        -- Обновляем статистику
-                        local reactionTime = tick() - startTime
-                        MonitorSystem:UpdateStats(success, reactionTime)
+                        local bounceVelY = -vel.Y * config.bounceDamping
+                        vel = Vector3.new(
+                            vel.X * config.frictionCoefficient,
+                            bounceVelY,
+                            vel.Z * config.frictionCoefficient
+                        )
                         
-                        -- Пауза после сейва
-                        RandomDelay(0.1, 0.3)
+                        bounceCount = bounceCount + 1
+                        
+                        if vel.Magnitude < config.minBounceVelocity then
+                            points[pointCount] = {pos, vector3Zero, 0}
+                            break
+                        end
+                    end
+                    
+                    if pos.Y < -500 or vel.Magnitude < 0.3 then
+                        break
                     end
                 end
+                
+                return points, pointCount
+            end
+
+            local function findFirstLanding(points, count)
+                for i = 2, count do
+                    local curr = points[i]
+                    local prev = points[i-1]
+                    local currPos, currVel = curr[1], curr[2]
+                    local prevPos, prevVel = prev[1], prev[2]
+                    
+                    if currPos.Y <= config.groundHeight + 0.5 and 
+                       prevPos.Y > config.groundHeight + 0.5 and
+                       currVel.Y < 0 then
+                        
+                        local t = (config.groundHeight - prevPos.Y) / (currPos.Y - prevPos.Y)
+                        t = math.clamp(t, 0, 1)
+                        
+                        return prevPos:Lerp(currPos, t), prevVel:Lerp(currVel, t)
+                    end
+                end
+                return nil, nil
+            end
+
+            local frameCounter = 0
+            local lastTrajectoryPoints = nil
+            local lastPointCount = 0
+            local lastLandingPos = nil
+            local lastLandingVel = nil
+
+            predictionConnection = RunService.Heartbeat:Connect(function()
+                frameCounter = frameCounter + 1
+                
+                if frameCounter % config.updateRate ~= 0 then
+                    return
+                end
+                
+                local ball = getBall()
+                if not ball then
+                    for i = 1, config.segmentCount do
+                        segments[i].Transparency = 1
+                    end
+                    landingMarker.Transparency = 1
+                    landingRing.Transparency = 1
+                    return
+                end
+                
+                local velocity = ball.AssemblyLinearVelocity
+                local speed = velocity.Magnitude
+                
+                if speed < config.minVelocityThreshold then
+                    for i = 1, config.segmentCount do
+                        segments[i].Transparency = 1
+                    end
+                    landingMarker.Transparency = 1
+                    landingRing.Transparency = 1
+                    return
+                end
+                
+                local trajectoryPoints, pointCount = simulateTrajectory(ball.Position, velocity)
+                lastTrajectoryPoints = trajectoryPoints
+                lastPointCount = pointCount
+                
+                if pointCount > 1 then
+                    local segmentStep = (pointCount - 1) / (config.segmentCount - 1)
+                    
+                    for i = 1, config.segmentCount do
+                        local pointIndex = math.floor((i - 1) * segmentStep) + 1
+                        local nextIndex = math.min(pointIndex + 1, pointCount)
+                        
+                        if pointIndex <= pointCount and nextIndex <= pointCount then
+                            local current = trajectoryPoints[pointIndex]
+                            local next = trajectoryPoints[nextIndex]
+                            local currentPos, nextPos = current[1], next[1]
+                            
+                            local midpoint = (currentPos + nextPos) * 0.5
+                            local distance = (nextPos - currentPos).Magnitude
+                            
+                            if distance > 0.01 then
+                                local direction = (nextPos - currentPos) / distance
+                                
+                                segments[i].Size = Vector3.new(0.3, 0.3, distance)
+                                segments[i].CFrame = CFrame.lookAt(midpoint, midpoint + direction)
+                                segments[i].Transparency = config.segmentTransparency
+                            else
+                                segments[i].Transparency = 1
+                            end
+                        else
+                            segments[i].Transparency = 1
+                        end
+                    end
+                else
+                    for i = 1, config.segmentCount do
+                        segments[i].Transparency = 1
+                    end
+                end
+                
+                local landingPos, landingVel = findFirstLanding(trajectoryPoints, pointCount)
+                lastLandingPos = landingPos
+                lastLandingVel = landingVel
+                
+                if landingPos then
+                    local markerPos = landingPos + Vector3.new(0, 0.1, 0)
+                    landingMarker.CFrame = CFrame.new(markerPos) * CFrame.Angles(0, 0, math.pi * 0.5)
+                    landingMarker.Transparency = 0.4
+                    
+                    local ringPos = landingPos + Vector3.new(0, 0.05, 0)
+                    landingRing.CFrame = CFrame.new(ringPos) * CFrame.Angles(0, 0, math.pi * 0.5)
+                    landingRing.Transparency = 0.6
+                    
+                    local pulse = math.sin(tick() * 5) * 0.5 + 0.5
+                    local scale = 6 + pulse
+                    landingRing.Size = Vector3.new(scale, 0.1, scale)
+                else
+                    landingMarker.Transparency = 1
+                    landingRing.Transparency = 1
+                end
+            end)
+        else
+            if predictionConnection then
+                predictionConnection:Disconnect()
+                predictionConnection = nil
+            end
+            
+            if curveFolder then
+                curveFolder:Destroy()
+                curveFolder = nil
             end
         end
-        
-        -- Контроль частоты обновления
-        local elapsed = tick() - startTime
-        local waitTime = math.max(0.001, self.UpdateInterval - elapsed)
-        task.wait(waitTime)
-        
-        self.LastUpdate = tick()
     end
-end
+})
+CreateHitbox()
+UpdateHitbox()
 
--- == ИНИЦИАЛИЗАЦИЯ И ЗАПУСК ==
-local function Initialize()
-    print("Initializing Goalkeeper AI v4.0...")
-    print("Session ID:", Security.SessionID)
-    
-    -- Проверяем безопасность
-    local isEnvironmentSafe = MonitorSystem:CheckSafety()
-    
-    if not isEnvironmentSafe then
-        warn("⚠️ WARNING: Environment check failed!")
-        Config.Mode = "SAFE"
-    end
-    
-    -- Запускаем основной цикл
-    spawn(function()
-        MainLoop:Start()
-    end)
-    
-    print("✅ Goalkeeper AI initialized successfully")
-    print("📊 Mode:", Config.Mode)
-    print("🛡️ Security Level:", Security.SuspicionLevel)
-end
+local PlayerTab = Window:Tab({
+    Title = "Player",
+    Icon = "user",
+})
 
--- Запускаем инициализацию
-Initialize()
+local PlayerSection = PlayerTab:Section({
+    Title = "Soon."
+})
 
--- Очистка при выходе
-game:BindToClose(function()
-    MainLoop.Running = false
-    if Interface.Elements.ScreenGui then
-        Interface.Elements.ScreenGui:Destroy()
-    end
-    print("🚪 Goalkeeper AI shutdown complete")
-end)
+local Dialog = Window:Dialog({
+    Icon = "bird",
+    Title = "Hey!",
+    Content = "Report To Our Discord If You Found Bugs/Glitches",
+    Buttons = {
+        {
+            Title = "Continue",
+            Callback = function()
+                CreateMainUI()
+            end
+        }
+    }
+})
+
+WindUI:Notify({
+    Title = "RSS Loaded",
+    Icon = "check",
+    Content = "Go Fuck RSS"
+})
