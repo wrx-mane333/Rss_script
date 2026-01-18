@@ -15,6 +15,41 @@ local Ball = nil
 local RSSHitbox = nil
 getgenv().InfiniteStaminaEnabled = false
 
+local SETTINGS_PREFIX = "RSSVETA_"
+local function GetSetting(key, default)
+    local v
+    pcall(function()
+        v = LocalPlayer:GetAttribute(SETTINGS_PREFIX .. key)
+    end)
+    if v == nil then
+        return default
+    end
+    return v
+end
+
+local function SetSetting(key, value)
+    pcall(function()
+        LocalPlayer:SetAttribute(SETTINGS_PREFIX .. key, value)
+    end)
+end
+
+ReachDistance = GetSetting("ReachDistance", ReachDistance)
+IsVisualizerEnabled = GetSetting("Visualizer", IsVisualizerEnabled)
+HitboxSize = Vector3.new(
+    GetSetting("HitboxX", HitboxSize.X),
+    GetSetting("HitboxY", HitboxSize.Y),
+    GetSetting("HitboxZ", HitboxSize.Z)
+)
+
+local SavedReachEnabled = GetSetting("ReachEnabled", false)
+local SavedAutoDiveEnabled = GetSetting("AutoDive", false)
+local SavedPredictEnabled = GetSetting("BallPredictor", false)
+getgenv().InfiniteStaminaEnabled = GetSetting("InfiniteStamina", getgenv().InfiniteStaminaEnabled)
+
+local ReachPredictionTime = GetSetting("ReachPredictionTime", 0.14)
+local ReachTouchCooldown = GetSetting("ReachTouchCooldown", 0.12)
+local lastReachTouch = 0
+
 local function IsMobileDevice()
     return UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled
 end
@@ -108,8 +143,17 @@ local function GetRoot()
 end
 
 local function FindBall()
+    if Ball and Ball.Parent and Ball:IsA("BasePart") then
+        return Ball
+    end
+
     local b = Workspace:FindFirstChild("ball")
-    if b and b:IsA("BasePart") then return b end
+        or Workspace:FindFirstChild("TPS")
+        or Workspace:FindFirstChild("PSoccerBall")
+    if b and b:IsA("BasePart") then
+        Ball = b
+        return b
+    end
 end
 
 local CachedTouchParts = {}
@@ -157,8 +201,12 @@ local function ReachLoop()
     local dynamicBonus = math.clamp(speed * 0.06, 0, baseReach * 1.2)
     local effectiveReach = (baseReach + dynamicBonus) * ReachDistance
 
-    local predictionTime = 0.14
-    local predictedPos = ball.Position + velocity * predictionTime
+    local predictedPos = ball.Position + velocity * ReachPredictionTime
+
+    local now = tick()
+    if now - lastReachTouch < ReachTouchCooldown then
+        return
+    end
 
     if (predictedPos - root.Position).Magnitude <= effectiveReach then
         if typeof(firetouchinterest) == "function" then
@@ -168,10 +216,10 @@ local function ReachLoop()
             for _, part in ipairs(CachedTouchParts) do
                 if part and part.Parent then
                     firetouchinterest(part, ball, 0)
-                    task.wait()
                     firetouchinterest(part, ball, 1)
                 end
             end
+            lastReachTouch = now
         end
     end
 end
@@ -219,6 +267,7 @@ end)
 RefreshTouchParts()
 
 local function SetReachEnabled(v)
+    SetSetting("ReachEnabled", v)
     if v then
         EnableReach()
     else
@@ -226,8 +275,15 @@ local function SetReachEnabled(v)
     end
 end
 
+local function SetVisualizerEnabled(v)
+    IsVisualizerEnabled = v
+    SetSetting("Visualizer", v)
+    UpdateHitbox()
+end
+
 local function SetInfiniteStaminaEnabled(v)
     getgenv().InfiniteStaminaEnabled = v
+    SetSetting("InfiniteStamina", v)
     if speeds then
         speeds.Walk.Value = v and speeds.Run.Value or defaultWalk
     end
@@ -246,37 +302,54 @@ local function FireDiveRemote(direction)
 end
 
 local function BindHotkeys()
-    if IsMobileDevice() then return end
-
     ContextActionService:UnbindAction("RSS_ToggleReach")
     ContextActionService:UnbindAction("RSS_ToggleVisualizer")
     ContextActionService:UnbindAction("RSS_ToggleStamina")
+    ContextActionService:UnbindAction("RSS_DiveLeft")
+    ContextActionService:UnbindAction("RSS_DiveRight")
+
+    local isMobile = IsMobileDevice()
 
     ContextActionService:BindAction("RSS_ToggleReach", function(_, state)
         if state ~= Enum.UserInputState.Begin then return end
         SetReachEnabled(not IsReachEnabled)
-    end, false, Enum.KeyCode.R)
+    end, isMobile, Enum.KeyCode.R)
 
     ContextActionService:BindAction("RSS_ToggleVisualizer", function(_, state)
         if state ~= Enum.UserInputState.Begin then return end
-        IsVisualizerEnabled = not IsVisualizerEnabled
-        UpdateHitbox()
-    end, false, Enum.KeyCode.H)
+        SetVisualizerEnabled(not IsVisualizerEnabled)
+    end, isMobile, Enum.KeyCode.H)
 
     ContextActionService:BindAction("RSS_ToggleStamina", function(_, state)
         if state ~= Enum.UserInputState.Begin then return end
         SetInfiniteStaminaEnabled(not getgenv().InfiniteStaminaEnabled)
-    end, false, Enum.KeyCode.T)
+    end, isMobile, Enum.KeyCode.T)
 
     ContextActionService:BindAction("RSS_DiveLeft", function(_, state)
         if state ~= Enum.UserInputState.Begin then return end
         FireDiveRemote("Left")
-    end, false, Enum.KeyCode.Q)
+    end, isMobile, Enum.KeyCode.Q)
 
     ContextActionService:BindAction("RSS_DiveRight", function(_, state)
         if state ~= Enum.UserInputState.Begin then return end
         FireDiveRemote("Right")
-    end, false, Enum.KeyCode.E)
+    end, isMobile, Enum.KeyCode.E)
+
+    if isMobile then
+        pcall(function()
+            ContextActionService:SetTitle("RSS_ToggleReach", "Reach")
+            ContextActionService:SetTitle("RSS_ToggleVisualizer", "Hitbox")
+            ContextActionService:SetTitle("RSS_ToggleStamina", "Stamina")
+            ContextActionService:SetTitle("RSS_DiveLeft", "Dive L")
+            ContextActionService:SetTitle("RSS_DiveRight", "Dive R")
+
+            ContextActionService:SetPosition("RSS_ToggleReach", UDim2.new(0.72, 0, 0.76, 0))
+            ContextActionService:SetPosition("RSS_ToggleVisualizer", UDim2.new(0.72, 0, 0.84, 0))
+            ContextActionService:SetPosition("RSS_ToggleStamina", UDim2.new(0.72, 0, 0.92, 0))
+            ContextActionService:SetPosition("RSS_DiveLeft", UDim2.new(0.02, 0, 0.84, 0))
+            ContextActionService:SetPosition("RSS_DiveRight", UDim2.new(0.14, 0, 0.84, 0))
+        end)
+    end
 end
 
 BindHotkeys()
@@ -315,6 +388,8 @@ if not RSSHitbox then
 end
 UpdateHitbox()
 
+SetReachEnabled(SavedReachEnabled)
+
 if Window then
 
 local MainTab = Window:Tab({
@@ -328,7 +403,7 @@ local MainSection = MainTab:Section({
 
 MainSection:Toggle({
     Title = "Enable Reach",
-    Default = false,
+    Default = SavedReachEnabled,
     Callback = function(v)
         SetReachEnabled(v)
     end
@@ -336,10 +411,9 @@ MainSection:Toggle({
 
 MainSection:Toggle({
     Title = "Show Hitbox",
-    Default = false,
+    Default = IsVisualizerEnabled,
     Callback = function(v)
-        IsVisualizerEnabled = v
-        UpdateHitbox()
+        SetVisualizerEnabled(v)
     end
 })
 
@@ -355,10 +429,11 @@ SizeSection:Slider({
     Value = {
         Min = 1,
         Max = 50,
-        Default = 10,
+        Default = HitboxSize.X,
     },
     Callback = function(v)
         HitboxSize = Vector3.new(v, HitboxSize.Y, HitboxSize.Z)
+        SetSetting("HitboxX", v)
         UpdateHitbox()
     end
 })
@@ -369,10 +444,11 @@ SizeSection:Slider({
     Value = {
         Min = 1,
         Max = 50,
-        Default = 10,
+        Default = HitboxSize.Y,
     },
     Callback = function(v)
         HitboxSize = Vector3.new(HitboxSize.X, v, HitboxSize.Z)
+        SetSetting("HitboxY", v)
         UpdateHitbox()
     end
 })
@@ -383,10 +459,11 @@ SizeSection:Slider({
     Value = {
         Min = 1,
         Max = 50,
-        Default = 10,
+        Default = HitboxSize.Z,
     },
     Callback = function(v)
         HitboxSize = Vector3.new(HitboxSize.X, HitboxSize.Y, v)
+        SetSetting("HitboxZ", v)
         UpdateHitbox()
     end
 })
@@ -397,10 +474,39 @@ SizeSection:Slider({
     Value = {
         Min = 1,
         Max = 5,
-        Default = 1,
+        Default = ReachDistance,
     },
     Callback = function(v)
         ReachDistance = v
+        SetSetting("ReachDistance", v)
+    end
+})
+
+SizeSection:Slider({
+    Title = "Reach Prediction Time",
+    Step = 0.01,
+    Value = {
+        Min = 0,
+        Max = 0.5,
+        Default = ReachPredictionTime,
+    },
+    Callback = function(v)
+        ReachPredictionTime = v
+        SetSetting("ReachPredictionTime", v)
+    end
+})
+
+SizeSection:Slider({
+    Title = "Reach Touch Cooldown",
+    Step = 0.01,
+    Value = {
+        Min = 0,
+        Max = 0.5,
+        Default = ReachTouchCooldown,
+    },
+    Callback = function(v)
+        ReachTouchCooldown = v
+        SetSetting("ReachTouchCooldown", v)
     end
 })
 
@@ -470,8 +576,9 @@ local DiveSection = GkTab:Section({
 local DiveToggle = DiveSection:Toggle({
     Title = "Auto Dive [PREDICTION]",
     Desc = "Smart Auto-GK with Velocity Prediction",
-    Default = false,
+    Default = SavedAutoDiveEnabled,
     Callback = function(enabled)
+        SetSetting("AutoDive", enabled)
         local Players = game:GetService("Players")
         local RunService = game:GetService("RunService")
 
@@ -597,7 +704,7 @@ local StaminaSection = StaminaTab:Section({
 
 StaminaSection:Toggle({
     Title = "Enable Infinite Stamina",
-    Default = false,
+    Default = getgenv().InfiniteStaminaEnabled,
     Callback = function(v)
         SetInfiniteStaminaEnabled(v)
     end
@@ -617,8 +724,9 @@ local curveFolder = nil
 
 PredictSection:Toggle({
     Title = "Enable Ball Predictor",
-    Default = false,
+    Default = SavedPredictEnabled,
     Callback = function(Value)
+        SetSetting("BallPredictor", Value)
         if Value then
             local Players = game:GetService("Players")
             local RunService = game:GetService("RunService")
@@ -900,39 +1008,6 @@ if not RSSHitbox then
 end
 UpdateHitbox()
 
-local ControlsTab = Window:Tab({
-    Title = "Controls",
-    Icon = "keyboard",
-})
-
-local ControlsSection = ControlsTab:Section({
-    Title = "PC / Mobile Support"
-})
-
-local CreateMainUI
-
-ControlsSection:Button({
-    Title = "Rebind Hotkeys (PC)",
-    Desc = "R=Reach, H=Hitbox, T=Stamina, Q/E=Dive",
-    Callback = function()
-        BindHotkeys()
-        Notify({
-            Title = "Controls",
-            Icon = "check",
-            Content = "Hotkeys bound: R, H, T, Q, E",
-            Duration = 4,
-        })
-    end
-})
-
-ControlsSection:Button({
-    Title = "Open Mobile Panel",
-    Desc = "Touch buttons for phone/tablet",
-    Callback = function()
-        CreateMainUI()
-    end
-})
-
 local PlayerTab = Window:Tab({
     Title = "Player",
     Icon = "user",
@@ -942,130 +1017,7 @@ local PlayerSection = PlayerTab:Section({
     Title = "Soon."
 })
 
-CreateMainUI = function()
-    local gui = LocalPlayer:FindFirstChild("PlayerGui")
-    if not gui then return end
-
-    local existing = gui:FindFirstChild("RSSVETA_MainUI")
-    if existing then
-        existing.Enabled = true
-        return
-    end
-
-    local screen = Instance.new("ScreenGui")
-    screen.Name = "RSSVETA_MainUI"
-    screen.ResetOnSpawn = false
-    screen.Parent = gui
-
-    local scale = Instance.new("UIScale")
-    scale.Scale = IsMobileDevice() and 1.05 or 1
-    scale.Parent = screen
-
-    local hint = Instance.new("TextLabel")
-    hint.BackgroundTransparency = 0.35
-    hint.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
-    hint.TextColor3 = Color3.fromRGB(255, 255, 255)
-    hint.TextWrapped = true
-    hint.TextXAlignment = Enum.TextXAlignment.Left
-    hint.TextYAlignment = Enum.TextYAlignment.Top
-    hint.Font = Enum.Font.Gotham
-    hint.TextSize = IsMobileDevice() and 14 or 12
-    hint.Size = UDim2.new(0, IsMobileDevice() and 320 or 360, 0, IsMobileDevice() and 120 or 90)
-    hint.Position = UDim2.new(0, 12, 0, 12)
-    hint.Text = IsMobileDevice() and "Mobile: use on-screen buttons (if your game provides them)." or "PC: R=Reach, H=Hitbox, T=Stamina, Q/E=Dive"
-    hint.Parent = screen
-
-    if IsMobileDevice() then
-        local panel = Instance.new("Frame")
-        panel.Name = "MobilePanel"
-        panel.BackgroundTransparency = 0.25
-        panel.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
-        panel.BorderSizePixel = 0
-        panel.Size = UDim2.new(0, 220, 0, 220)
-        panel.Position = UDim2.new(1, -232, 1, -232)
-        panel.Parent = screen
-
-        local corner = Instance.new("UICorner")
-        corner.CornerRadius = UDim.new(0, 10)
-        corner.Parent = panel
-
-        local padding = Instance.new("UIPadding")
-        padding.PaddingTop = UDim.new(0, 10)
-        padding.PaddingBottom = UDim.new(0, 10)
-        padding.PaddingLeft = UDim.new(0, 10)
-        padding.PaddingRight = UDim.new(0, 10)
-        padding.Parent = panel
-
-        local layout = Instance.new("UIListLayout")
-        layout.FillDirection = Enum.FillDirection.Vertical
-        layout.HorizontalAlignment = Enum.HorizontalAlignment.Center
-        layout.SortOrder = Enum.SortOrder.LayoutOrder
-        layout.Padding = UDim.new(0, 8)
-        layout.Parent = panel
-
-        local function makeButton(name)
-            local b = Instance.new("TextButton")
-            b.Name = name
-            b.AutoButtonColor = true
-            b.BackgroundColor3 = Color3.fromRGB(35, 35, 35)
-            b.BorderSizePixel = 0
-            b.Size = UDim2.new(1, 0, 0, 32)
-            b.Font = Enum.Font.GothamSemibold
-            b.TextSize = 14
-            b.TextColor3 = Color3.fromRGB(255, 255, 255)
-            local c = Instance.new("UICorner")
-            c.CornerRadius = UDim.new(0, 8)
-            c.Parent = b
-            b.Parent = panel
-            return b
-        end
-
-        local btnReach = makeButton("Reach")
-        local btnHitbox = makeButton("Hitbox")
-        local btnStamina = makeButton("Stamina")
-        local btnDiveL = makeButton("DiveLeft")
-        local btnDiveR = makeButton("DiveRight")
-        local btnClose = makeButton("Close")
-
-        local function refreshText()
-            btnReach.Text = IsReachEnabled and "Reach: ON" or "Reach: OFF"
-            btnHitbox.Text = IsVisualizerEnabled and "Hitbox: ON" or "Hitbox: OFF"
-            btnStamina.Text = getgenv().InfiniteStaminaEnabled and "Stamina: ON" or "Stamina: OFF"
-            btnDiveL.Text = "Dive: Left"
-            btnDiveR.Text = "Dive: Right"
-            btnClose.Text = "Close"
-        end
-
-        btnReach.MouseButton1Click:Connect(function()
-            SetReachEnabled(not IsReachEnabled)
-            refreshText()
-        end)
-
-        btnHitbox.MouseButton1Click:Connect(function()
-            IsVisualizerEnabled = not IsVisualizerEnabled
-            UpdateHitbox()
-            refreshText()
-        end)
-
-        btnStamina.MouseButton1Click:Connect(function()
-            SetInfiniteStaminaEnabled(not getgenv().InfiniteStaminaEnabled)
-            refreshText()
-        end)
-
-        btnDiveL.MouseButton1Click:Connect(function()
-            FireDiveRemote("Left")
-        end)
-
-        btnDiveR.MouseButton1Click:Connect(function()
-            FireDiveRemote("Right")
-        end)
-
-        btnClose.MouseButton1Click:Connect(function()
-            screen.Enabled = false
-        end)
-
-        refreshText()
-    end
+local function CreateMainUI()
 end
 
 local Dialog = Window:Dialog({
