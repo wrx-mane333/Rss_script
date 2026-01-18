@@ -75,10 +75,13 @@ local function ReachLoop()
     local baseReach = math.max(HitboxSize.X, HitboxSize.Y, HitboxSize.Z) / 2
     local velocity = ball.AssemblyLinearVelocity or Vector3.new()
     local speed = velocity.Magnitude
-    local dynamicBonus = math.clamp(speed * 0.05, 0, baseReach)
+    local dynamicBonus = math.clamp(speed * 0.06, 0, baseReach * 1.2)
     local effectiveReach = baseReach + dynamicBonus
 
-    if (ball.Position - root.Position).Magnitude <= effectiveReach then
+    local predictionTime = 0.14
+    local predictedPos = ball.Position + velocity * predictionTime
+
+    if (predictedPos - root.Position).Magnitude <= effectiveReach then
         for _, part in LocalPlayer.Character:GetChildren() do
             if part:IsA("BasePart") then
                 firetouchinterest(part, ball, 0)
@@ -298,24 +301,26 @@ local DiveToggle = DiveSection:Toggle({
         
         if not enabled then return end
 
-        local DIVE_DISTANCE = 14
+        local DIVE_DISTANCE = 16
         local DIVE_COOLDOWN = 0.8
         local BASE_PREDICTION_TIME = 0.25
         local MAX_PREDICTION_TIME = 0.6
-        local PREDICTION_SPEED_FACTOR = 0.01
-        local MIN_BALL_SPEED = 10
-        local SPIN_INFLUENCE = 0.03
+        local PREDICTION_SPEED_FACTOR = 0.012
+        local MIN_BALL_SPEED = 6
+        local SPIN_INFLUENCE = 0.04
         local LAG_DISTANCE_MULTIPLIER = 1.25
 
         local lastDiveTime = 0
         local leftDiveButton = nil
         local rightDiveButton = nil
+        local jumpButtonRef = nil
 
         -- Получаем кнопки (для мобильного управления)
         local playerGui = LocalPlayer:WaitForChild("PlayerGui")
         local mobileCTRL = playerGui:WaitForChild("MobileCTRL")
         local touchControlFrame = mobileCTRL:WaitForChild("TouchControlFrame")
         local jumpButton = touchControlFrame:WaitForChild("JumpButton")
+        jumpButtonRef = jumpButton
         leftDiveButton = jumpButton:WaitForChild("LeftDive")
         rightDiveButton = jumpButton:WaitForChild("RightDive")
 
@@ -329,7 +334,7 @@ local DiveToggle = DiveSection:Toggle({
             end
         end
 
-        local function autoDive(predictedPos, extraDistance)
+        local function autoDive(predictedPos)
             local currentTime = tick()
             
             if currentTime - lastDiveTime < DIVE_COOLDOWN then return end
@@ -338,13 +343,21 @@ local DiveToggle = DiveSection:Toggle({
             local playerCFrame = HumanoidRootPart.CFrame
             local localBallPos = playerCFrame:PointToObjectSpace(predictedPos)
             
-            if localBallPos.X < -1 then -- Левее центра
-                clickButton(leftDiveButton)
-                lastDiveTime = currentTime
-            elseif localBallPos.X > 1 then -- Правее центра
-                clickButton(rightDiveButton)
-                lastDiveTime = currentTime
-            -- Если мяч летит прямо в центр, можно добавить прыжок вверх или стоять (опционально)
+            if localBallPos.X < -1 then
+                if leftDiveButton then
+                    clickButton(leftDiveButton)
+                    lastDiveTime = currentTime
+                end
+            elseif localBallPos.X > 1 then
+                if rightDiveButton then
+                    clickButton(rightDiveButton)
+                    lastDiveTime = currentTime
+                end
+            else
+                if jumpButtonRef then
+                    clickButton(jumpButtonRef)
+                    lastDiveTime = currentTime
+                end
             end
         end
 
