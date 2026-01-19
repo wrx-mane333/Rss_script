@@ -574,40 +574,8 @@ local function calculateDiveDirection(ball, playerCFrame)
     end
 end
 
-local function doDive(direction, leftDiveButton, rightDiveButton, jumpButton)
-    if not leftDiveButton or not rightDiveButton or not jumpButton then return end
-    
-    local function clickButton(btn)
-        if typeof(getconnections) == "function" and btn.MouseButton1Click then
-            local connections = getconnections(btn.MouseButton1Click)
-            if connections and #connections > 0 then
-                for _, conn in ipairs(connections) do
-                    conn:Fire()
-                end
-                return
-            end
-        end
-        btn.MouseButton1Click:Fire()
-    end
-    
-    if direction == "Left" then
-        clickButton(leftDiveButton)
-    elseif direction == "Right" then
-        clickButton(rightDiveButton)
-    elseif direction == "UpperLeft" then
-        clickButton(leftDiveButton)
-        task.wait(0.05)
-        clickButton(jumpButton)
-    elseif direction == "UpperRight" then
-        clickButton(rightDiveButton)
-        task.wait(0.05)
-        clickButton(jumpButton)
-    elseif direction == "Low" then
-        -- Hold button pattern for low dive
-        clickButton(jumpButton)
-    elseif direction == "Upper" or direction == "Center" then
-        clickButton(jumpButton)
-    end
+local function doDive(direction)
+    TryJump(direction)
 end
 
 -- ===== AUTO GK V2 TOGGLE =====
@@ -627,24 +595,25 @@ local GKV2Toggle = GKV2Section:Toggle({
             GKV2_CONNECTION = nil
         end
         
-        if not enabled then return end
+        -- Conflict prevention: disable Auto Dive V1 when V2 is enabled
+        if enabled and getgenv().AutoDiveConnection then
+            getgenv().AutoDiveConnection:Disconnect()
+            getgenv().AutoDiveConnection = nil
+        end
+        
+        if not enabled then 
+            return 
+        end
         
         local Character = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
         local HumanoidRootPart = Character:WaitForChild("HumanoidRootPart")
-        
-        local playerGui = LocalPlayer:WaitForChild("PlayerGui")
-        local mobileCTRL = playerGui:WaitForChild("MobileCTRL")
-        local touchControlFrame = mobileCTRL:WaitForChild("TouchControlFrame")
-        local jumpButton = touchControlFrame:WaitForChild("JumpButton")
-        local leftDiveButton = jumpButton:WaitForChild("LeftDive")
-        local rightDiveButton = jumpButton:WaitForChild("RightDive")
         
         local lastDiveTime = 0
         
         GKV2_CONNECTION = RunService.Heartbeat:Connect(function()
             if not GKV2_ENABLED then return end
             
-            local ball = Workspace:FindFirstChild("ball") or Workspace:FindFirstChild("TPS") or Workspace:FindFirstChild("PSoccerBall")
+            local ball = GetActiveBall()
             if not ball then return end
             
             local playerPos = HumanoidRootPart.Position
@@ -670,7 +639,7 @@ local GKV2Toggle = GKV2Section:Toggle({
             
             -- Calculate and perform dive
             local diveDir = calculateDiveDirection(ball, HumanoidRootPart.CFrame)
-            doDive(diveDir, leftDiveButton, rightDiveButton, jumpButton)
+            doDive(diveDir)
             lastDiveTime = currentTime
         end)
         
@@ -757,30 +726,6 @@ local DiveToggle = DiveSection:Toggle({
         end
 
         local lastDiveTime = 0
-        local leftDiveButton = nil
-        local rightDiveButton = nil
-        local jumpButton = nil
-
-        pcall(function()
-            local playerGui = LocalPlayer:WaitForChild("PlayerGui")
-            local mobileCTRL = playerGui:WaitForChild("MobileCTRL")
-            local touchControlFrame = mobileCTRL:WaitForChild("TouchControlFrame")
-            jumpButton = touchControlFrame:WaitForChild("JumpButton")
-            leftDiveButton = jumpButton:WaitForChild("LeftDive")
-            rightDiveButton = jumpButton:WaitForChild("RightDive")
-        end)
-
-        local function clickButton(btn)
-            if not btn then return end
-            if typeof(getconnections) == "function" and btn.MouseButton1Click then
-                local connections = getconnections(btn.MouseButton1Click)
-                if connections and #connections > 0 then
-                    connections[1]:Fire()
-                    return
-                end
-            end
-            btn.MouseButton1Click:Fire()
-        end
 
         local function smartDive(ballPos, ballVel)
             local currentTime = tick()
@@ -798,60 +743,60 @@ local DiveToggle = DiveSection:Toggle({
             local dirY = localBallPos.Y
             local distFromPlayer = (HumanoidRootPart.Position - predictedPos).Magnitude
             
-            -- Увеличиваем чувствительность для быстрых мячей
+            -- Умная реакция в зависимости от скорости мяча
             if ballSpeed > 20 then
                 -- Очень быстрый мяч - агрессивная реакция
                 if dirY > 3 then
                     if dirX < -1 then
-                        clickButton(leftDiveButton)
+                        TryJump("Left")
                     elseif dirX > 1 then
-                        clickButton(rightDiveButton)
+                        TryJump("Right")
                     else
-                        clickButton(jumpButton)
+                        TryJump("Upper")
                     end
                 elseif dirY < -2 then
-                    clickButton(jumpButton)
+                    TryJump("Center")
                 else
                     if dirX < -0.5 then
-                        clickButton(leftDiveButton)
+                        TryJump("Left")
                     elseif dirX > 0.5 then
-                        clickButton(rightDiveButton)
+                        TryJump("Right")
                     else
-                        clickButton(jumpButton)
+                        TryJump("Center")
                     end
                 end
             elseif ballSpeed > 12 then
                 -- Средняя скорость
                 if dirY > 4 then
                     if dirX < -2 then
-                        clickButton(leftDiveButton)
+                        TryJump("UpperLeft")
                     elseif dirX > 2 then
-                        clickButton(rightDiveButton)
+                        TryJump("UpperRight")
                     else
-                        clickButton(jumpButton)
+                        TryJump("Upper")
                     end
                 elseif dirY < -1 then
-                    clickButton(jumpButton)
+                    TryJump("Center")
                 else
                     if dirX < -1.5 then
-                        clickButton(leftDiveButton)
+                        TryJump("Left")
                     elseif dirX > 1.5 then
-                        clickButton(rightDiveButton)
+                        TryJump("Right")
                     else
-                        clickButton(jumpButton)
+                        TryJump("Center")
                     end
                 end
             else
                 -- Медленный мяч - точные движения
                 if dirY > 5 then
-                    clickButton(jumpButton)
+                    TryJump("Upper")
                 else
                     if dirX < -1 then
-                        clickButton(leftDiveButton)
+                        TryJump("Left")
                     elseif dirX > 1 then
-                        clickButton(rightDiveButton)
+                        TryJump("Right")
                     else
-                        clickButton(jumpButton)
+                        TryJump("Center")
                     end
                 end
             end
@@ -860,7 +805,7 @@ local DiveToggle = DiveSection:Toggle({
         end
 
         getgenv().AutoDiveConnection = RunService.Heartbeat:Connect(function()
-            local ball = Workspace:FindFirstChild("ball") or Workspace:FindFirstChild("TPS") or Workspace:FindFirstChild("PSoccerBall")
+            local ball = GetActiveBall()
             if not ball then return end
             
             local ballPos = ball.Position
@@ -956,20 +901,9 @@ PredictSection:Toggle({
             local gravityVector = Vector3.new(0, -config.gravity, 0)
 
             local cachedBall = nil
-            local lastBallCheck = 0
-            local ballCheckInterval = 1
 
             local function getBall()
-                local now = tick()
-                if cachedBall and cachedBall.Parent and now - lastBallCheck < ballCheckInterval then
-                    return cachedBall
-                end
-                
-                lastBallCheck = now
-                cachedBall = Workspace:FindFirstChild("TPS", true) 
-                    or Workspace:FindFirstChild("PSoccerBall", true)
-                    or Workspace:FindFirstChild("ball", true)
-                
+                cachedBall = GetActiveBall()
                 return cachedBall
             end
 
