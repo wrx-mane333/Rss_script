@@ -294,6 +294,96 @@ local DiveSection = GkTab:Section({
         Title = "Auto Dive"
     })
 
+-- ===== DETECTION SETTINGS SECTION =====
+local DetectionSection = GkTab:Section({
+    Title = "Detection Settings"
+})
+
+DetectionSection:Slider({
+    Title = "Ball Detection Range",
+    Desc = "Дальність обнаружения мяча (Auto Dive)",
+    Step = 1,
+    Value = {
+        Min = 15,
+        Max = 40,
+        Default = 25,
+    },
+    Callback = function(v)
+        DIVE_DISTANCE_REGULAR = v
+        WindUI:Notify({
+            Title = "Detection Range",
+            Icon = "target",
+            Content = "Auto Dive: " .. v .. " studs",
+            Duration = 2,
+        })
+    end
+})
+
+DetectionSection:Slider({
+    Title = "Ball Detection Range V2",
+    Desc = "Дальність обнаружения мяча (Auto GK V2)",
+    Step = 1,
+    Value = {
+        Min = 20,
+        Max = 60,
+        Default = 40,
+    },
+    Callback = function(v)
+        GKV2_DETECTION_DISTANCE = v
+        WindUI:Notify({
+            Title = "Detection Range",
+            Icon = "target",
+            Content = "Auto GK V2: " .. v .. " studs",
+            Duration = 2,
+        })
+    end
+})
+
+DetectionSection:Slider({
+    Title = "Min Ball Speed",
+    Desc = "Мінімальна швидкість для реакції",
+    Step = 1,
+    Value = {
+        Min = 3,
+        Max = 15,
+        Default = 7,
+    },
+    Callback = function(v)
+        MIN_BALL_SPEED_REGULAR = v
+        WindUI:Notify({
+            Title = "Min Speed",
+            Icon = "zap",
+            Content = "Min Speed: " .. v,
+            Duration = 2,
+        })
+    end
+})
+
+DetectionSection:Slider({
+    Title = "Dive Cooldown",
+    Desc = "Період між прыжками",
+    Step = 0.05,
+    Value = {
+        Min = 0.3,
+        Max = 1.0,
+        Default = 0.45,
+    },
+    Callback = function(v)
+        DIVE_COOLDOWN_REGULAR = v
+        GKV2_DIVE_COOLDOWN = v
+        WindUI:Notify({
+            Title = "Cooldown",
+            Icon = "clock",
+            Content = "Cooldown: " .. string.format("%.2f", v) .. "s",
+            Duration = 2,
+        })
+    end
+})
+
+local DiveSection = GkTab:Section({
+        Title = "Auto Dive"
+    })
+
 -- ===== AUTO GK V2 FUNCTIONS =====
 local GKV2_MIN_BALL_SPEED = 8
 local GKV2_NEAR_GOAL_DISTANCE_4v4 = 25
@@ -301,7 +391,14 @@ local GKV2_NEAR_GOAL_DISTANCE_7v7 = 45
 local GKV2_DIVE_COOLDOWN = 0.45
 local GKV2_ENABLED = false
 local GKV2_CONNECTION = nil
+local GKV2_DETECTION_DISTANCE = 40
 local GK_GOAL_Z_POSITION = -150
+
+-- ===== AUTO DIVE VARIABLES =====
+local DIVE_DISTANCE_REGULAR = 25
+local DIVE_COOLDOWN_REGULAR = 0.45
+local PREDICTION_TIME_REGULAR = 0.18
+local MIN_BALL_SPEED_REGULAR = 7
 
 local function isBallHeadingToGoal(ball, playerPos)
     if not ball or not playerPos then return false end
@@ -479,7 +576,7 @@ local GKV2Toggle = GKV2Section:Toggle({
             if not isPlayerNearGoal(playerPos) then return end
             
             local distance = (playerPos - ball.Position).Magnitude
-            if distance > 40 then return end
+            if distance > GKV2_DETECTION_DISTANCE then return end
             
             -- Check cooldown
             local currentTime = tick()
@@ -573,11 +670,6 @@ local DiveToggle = DiveSection:Toggle({
             return
         end
 
-        local DIVE_DISTANCE = 25
-        local DIVE_COOLDOWN = 0.45
-        local PREDICTION_TIME = 0.18
-        local MIN_BALL_SPEED = 7
-
         local lastDiveTime = 0
         local leftDiveButton = nil
         local rightDiveButton = nil
@@ -607,12 +699,12 @@ local DiveToggle = DiveSection:Toggle({
         local function smartDive(ballPos, ballVel)
             local currentTime = tick()
             
-            if currentTime - lastDiveTime < DIVE_COOLDOWN then
+            if currentTime - lastDiveTime < DIVE_COOLDOWN_REGULAR then
                 return
             end
             
             local ballSpeed = ballVel.Magnitude
-            local predictedPos = ballPos + ballVel * PREDICTION_TIME
+            local predictedPos = ballPos + ballVel * PREDICTION_TIME_REGULAR
             local playerCFrame = HumanoidRootPart.CFrame
             local localBallPos = playerCFrame:PointToObjectSpace(predictedPos)
             
@@ -689,11 +781,11 @@ local DiveToggle = DiveSection:Toggle({
             local ballVel = ball.AssemblyLinearVelocity
             local ballSpeed = ballVel.Magnitude
             
-            if ballSpeed < MIN_BALL_SPEED then return end
+            if ballSpeed < MIN_BALL_SPEED_REGULAR then return end
             
             local distance = (HumanoidRootPart.Position - ballPos).Magnitude
             
-            if distance <= DIVE_DISTANCE and distance > 1 then
+            if distance <= DIVE_DISTANCE_REGULAR and distance > 1 then
                 smartDive(ballPos, ballVel)
             end
         end)
