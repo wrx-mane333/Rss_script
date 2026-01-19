@@ -2,6 +2,8 @@ local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local Workspace = game:GetService("Workspace")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local UserInputService = game:GetService("UserInputService")
+local VirtualInputManager = game:GetService("VirtualInputManager")
 local LocalPlayer = Players.LocalPlayer
 local ReachDistance = 1
 local IsReachEnabled = false
@@ -11,6 +13,78 @@ local ReachConnection = nil
 local Ball = nil
 local RSSHitbox = nil
 getgenv().InfiniteStaminaEnabled = false
+
+-- ===== GLOBAL UTILITY FUNCTIONS =====
+local function GetActiveBall()
+    local ballNames = {"ball", "TPS", "PSoccerBall"}
+    for _, name in ipairs(ballNames) do
+        local b = Workspace:FindFirstChild(name)
+        if b and b:IsA("BasePart") then return b end
+    end
+    return nil
+end
+
+local function ClickButton(btn)
+    if not btn then return false end
+    if typeof(getconnections) == "function" and btn.MouseButton1Click then
+        local connections = getconnections(btn.MouseButton1Click)
+        if connections and #connections > 0 then
+            connections[1]:Fire()
+            return true
+        end
+    end
+    btn.MouseButton1Click:Fire()
+    return true
+end
+
+local function TryJump(direction)
+    direction = direction or "Center"
+    
+    -- ПК: VirtualInputManager
+    pcall(function()
+        if direction == "Center" or direction == "Upper" or direction == "Low" then
+            VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.Space, false, game)
+            task.wait(0.05)
+            VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.Space, false, game)
+        elseif direction == "Left" then
+            VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.Q, false, game)
+            task.wait(0.05)
+            VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.Q, false, game)
+        elseif direction == "Right" then
+            VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.E, false, game)
+            task.wait(0.05)
+            VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.E, false, game)
+        end
+    end)
+    
+    -- Мобайл: Touch кнопки
+    pcall(function()
+        local playerGui = LocalPlayer:FindFirstChild("PlayerGui")
+        if not playerGui then return end
+        local mobileCTRL = playerGui:FindFirstChild("MobileCTRL")
+        if not mobileCTRL then return end
+        local touchControlFrame = mobileCTRL:FindFirstChild("TouchControlFrame")
+        if not touchControlFrame then return end
+        local jumpButton = touchControlFrame:FindFirstChild("JumpButton")
+        if not jumpButton then return end
+        
+        if direction == "Center" or direction == "Upper" or direction == "Low" then
+            ClickButton(jumpButton)
+        elseif direction == "Left" then
+            local leftDive = jumpButton:FindFirstChild("LeftDive")
+            if leftDive then ClickButton(leftDive) end
+        elseif direction == "Right" then
+            local rightDive = jumpButton:FindFirstChild("RightDive")
+            if rightDive then ClickButton(rightDive) end
+        end
+    end)
+end
+
+-- ===== CLEAR OLD HITBOXES =====
+pcall(function()
+    local oldHitbox = Workspace.Terrain:FindFirstChild("RSSHitbox")
+    if oldHitbox then oldHitbox:Destroy() end
+end)
 
 local function CreateHitbox()
     if RSSHitbox then RSSHitbox:Destroy() end
@@ -81,8 +155,7 @@ local function GetRoot()
 end
 
 local function FindBall()
-    local b = Workspace:FindFirstChild("ball")
-    if b and b:IsA("BasePart") then return b end
+    return GetActiveBall()
 end
 
 local function ReachLoop()
@@ -90,20 +163,37 @@ local function ReachLoop()
     if not root or not RSSHitbox then return end
 
     RSSHitbox.Adornee = root
-    local Glow = RSSHitbox:FindFirstChild("Glow")
-    if Glow then Glow.Adornee = root end
+    local InnerGlow = RSSHitbox:FindFirstChild("InnerGlow")
+    local OuterGlow = RSSHitbox:FindFirstChild("OuterGlow")
+    if InnerGlow then InnerGlow.Adornee = root end
+    if OuterGlow then OuterGlow.Adornee = root end
 
     local ball = FindBall()
     if not ball then return end
 
+    --優化: тільки конечності
+    local touchParts = {
+        root,
+        LocalPlayer.Character:FindFirstChild("LeftUpperLeg"),
+        LocalPlayer.Character:FindFirstChild("RightUpperLeg"),
+        LocalPlayer.Character:FindFirstChild("LeftLowerLeg"),
+        LocalPlayer.Character:FindFirstChild("RightLowerLeg"),
+        LocalPlayer.Character:FindFirstChild("LeftFoot"),
+        LocalPlayer.Character:FindFirstChild("RightFoot"),
+        LocalPlayer.Character:FindFirstChild("LeftUpperArm"),
+        LocalPlayer.Character:FindFirstChild("RightUpperArm"),
+    }
+
     local effectiveReach = math.max(HitboxSize.X, HitboxSize.Y, HitboxSize.Z) / 2
 
     if (ball.Position - root.Position).Magnitude <= effectiveReach then
-        for _, part in LocalPlayer.Character:GetChildren() do
-            if part:IsA("BasePart") then
-                firetouchinterest(part, ball, 0)
-                task.wait()
-                firetouchinterest(part, ball, 1)
+        for _, part in ipairs(touchParts) do
+            if part and part:IsA("BasePart") then
+                pcall(function()
+                    firetouchinterest(part, ball, 0)
+                    task.wait()
+                    firetouchinterest(part, ball, 1)
+                end)
             end
         end
     end
@@ -239,10 +329,6 @@ local GkTab = Window:Tab({
     Title = "GK Features",
     Icon = "rbxassetid://10734950020"
 })
-
-local Players = game:GetService("Players")
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local LocalPlayer = Players.LocalPlayer
 
 local function isInFansTeam()
     return LocalPlayer.Team and LocalPlayer.Team.Name == "Fans"
