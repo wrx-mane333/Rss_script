@@ -14,9 +14,18 @@ local ReachConnection = nil
 local RSSHitbox = nil
 
 getgenv().InfiniteStaminaEnabled = false
+getgenv().StatsLoopRunning = false
 -- Сброс старых соединений при перезапуске
 if getgenv().AutoDiveConnection then getgenv().AutoDiveConnection:Disconnect() end
 if getgenv().GKV2_CONNECTION then getgenv().GKV2_CONNECTION:Disconnect() end
+if getgenv().StatsConnection then getgenv().StatsConnection:Disconnect() end
+
+-- Очистка старых визуализаций при перезапуске
+pcall(function()
+    if Workspace:FindFirstChild("BallPredictionCurve") then
+        Workspace.BallPredictionCurve:Destroy()
+    end
+end)
 
 -- ===== GLOBAL UTILITY FUNCTIONS =====
 local function GetActiveBall()
@@ -44,15 +53,19 @@ end
 local function TryJump(direction)
     direction = direction or "Center"
     
-    -- Мобайл: Touch кнопки
+    -- Мобайл: Touch кнопки с защитой от ошибок
     pcall(function()
         local playerGui = LocalPlayer:FindFirstChild("PlayerGui")
         if not playerGui then return end
-        local mobileCTRL = playerGui:FindFirstChild("MobileCTRL")
+        
+        -- Попытка найти MobileCTRL (основное имя)
+        local mobileCTRL = playerGui:FindFirstChild("MobileCTRL") or playerGui:FindFirstChild("MobileControls")
         if not mobileCTRL then return end
-        local touchControlFrame = mobileCTRL:FindFirstChild("TouchControlFrame")
+        
+        local touchControlFrame = mobileCTRL:FindFirstChild("TouchControlFrame") or mobileCTRL:FindFirstChild("TouchFrame")
         if not touchControlFrame then return end
-        local jumpButton = touchControlFrame:FindFirstChild("JumpButton")
+        
+        local jumpButton = touchControlFrame:FindFirstChild("JumpButton") or touchControlFrame:FindFirstChild("JumpBtn")
         if not jumpButton then return end
         
         if direction == "Center" or direction == "Upper" or direction == "Low" then
@@ -149,21 +162,15 @@ local function ReachLoop()
 
     local touchParts = {
         root,
-        LocalPlayer.Character:FindFirstChild("LeftUpperLeg"),
-        LocalPlayer.Character:FindFirstChild("RightUpperLeg"),
-        LocalPlayer.Character:FindFirstChild("LeftLowerLeg"),
-        LocalPlayer.Character:FindFirstChild("RightLowerLeg"),
         LocalPlayer.Character:FindFirstChild("LeftFoot"),
         LocalPlayer.Character:FindFirstChild("RightFoot"),
-        LocalPlayer.Character:FindFirstChild("LeftUpperArm"),
-        LocalPlayer.Character:FindFirstChild("RightUpperArm"),
-        LocalPlayer.Character:FindFirstChild("LeftLowerArm"),
-        LocalPlayer.Character:FindFirstChild("RightLowerArm"),
         LocalPlayer.Character:FindFirstChild("LeftHand"),
         LocalPlayer.Character:FindFirstChild("RightHand"),
     }
 
-    local effectiveReach = math.max(HitboxSize.X, HitboxSize.Y, HitboxSize.Z) / 2
+    -- Anti-cheat: максимум 35 для избежания кика
+    local maxReach = math.min(35, math.max(HitboxSize.X, HitboxSize.Y, HitboxSize.Z) / 2)
+    local effectiveReach = math.max(5, maxReach)
 
     if (ball.Position - root.Position).Magnitude <= effectiveReach then
         for _, part in ipairs(touchParts) do
@@ -278,9 +285,17 @@ AutoPickSection:Dropdown({
             WindUI:Notify({Title = "Error", Icon = "ban", Content = "Must be in Fans/No Team!", Duration = 3})
             return
         end
+        
         local teamColor = (option == "Home GK") and BrickColor.new(23) or BrickColor.new(141)
-        ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("TeamChange"):FireServer(teamColor, "Goalie")
-        WindUI:Notify({Title = "Success", Icon = "check", Content = "Changed to " .. option, Duration = 2})
+        local success = pcall(function()
+            ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("TeamChange"):FireServer(teamColor, "Goalie")
+        end)
+        
+        if success then
+            WindUI:Notify({Title = "✅ Success", Icon = "check", Content = "Changed to " .. option, Duration = 2})
+        else
+            WindUI:Notify({Title = "❌ Error", Icon = "ban", Content = "Failed to change team", Duration = 2})
+        end
     end
 })
 
@@ -288,6 +303,8 @@ local StatsSection = GkTab:Section({ Title = "GK Stats" })
 StatsSection:Label("Stats refresh each second")
 
 local function UpdateStats()
+    if not getgenv().StatsLoopRunning then return end
+    
     local Character = LocalPlayer.Character
     if not Character then return end
     local HumanoidRootPart = Character:FindFirstChild("HumanoidRootPart")
@@ -297,17 +314,29 @@ local function UpdateStats()
     local ballDist = ball and math.floor((HumanoidRootPart.Position - ball.Position).Magnitude) or 0
     local ballSpeed = ball and math.floor(ball.AssemblyLinearVelocity.Magnitude * 10) / 10 or 0
     
-    StatsSection:Label("Distance to Ball: " .. ballDist .. " studs")
-    StatsSection:Label("Ball Speed: " .. ballSpeed .. " m/s")
-    StatsSection:Label("Mode: " .. (GKV2_ENABLED and "V2 (Smart)" or (V1_ENABLED and "V1 (Simple)" or "OFF")))
+    pcall(function()
+        StatsSection:Label("Distance to Ball: " .. ballDist .. " studs")
+        StatsSection:Label("Ball Speed: " .. ballSpeed .. " m/s")
+        StatsSection:Label("Mode: " .. (GKV2_ENABLED and "V2 (Smart)" or (V1_ENABLED and "V1 (Simple)" or "OFF")))
+    end)
 end
 
-task.spawn(function()
-    while true do
+-- Контролируемый Stats Loop с возможностью остановки
+local function StartStatsLoop()
+    if getgenv().StatsConnection then return end
+    getgenv().StatsLoopRunning = true
+    
+    getgenv().StatsConnection = RunService.Heartbeat:Connect(function()
+        if not getgenv().StatsLoopRunning then
+            getgenv().StatsConnection:Disconnect()
+            getgenv().StatsConnection = nil
+            return
+        end
         UpdateStats()
-        task.wait(1)
-    end
-end)
+    end)
+end
+
+StartStatsLoop()
 
 -- GK Variables
 local GKV2_ENABLED = false
@@ -411,6 +440,7 @@ V2_Toggle_Func = GKV2Section:Toggle({
         if enabled then
             WindUI:Notify({Title = "✅ Auto GK V2", Content = "Smart Prediction Enabled", Duration = 2})
         else
+            ModeInfo:Update("Status: ⚫ Disabled")
             return
         end
         
@@ -466,6 +496,7 @@ V1_Toggle_Func = DiveSection:Toggle({
         if enabled then
             WindUI:Notify({Title = "✅ Auto Dive V1", Content = "Simple Mode Enabled", Duration = 2})
         else
+            ModeInfo:Update("Status: ⚫ Disabled")
             return
         end
 
@@ -576,6 +607,12 @@ PredictSection:Toggle({
         end
 
         predictionConnection = RunService.Heartbeat:Connect(function()
+            if not curveFolder or not curveFolder.Parent then
+                predictionConnection:Disconnect()
+                predictionConnection = nil
+                return
+            end
+            
             local ball = GetActiveBall()
             if not ball then 
                 for _, s in ipairs(segments) do s.Transparency = 1 end
@@ -600,7 +637,7 @@ PredictSection:Toggle({
                 seg.Transparency = 0.3
                 
                 pos = nextPos
-                if pos.Y < 0 then break end -- Ground check
+                if pos.Y < 0 then break end
             end
         end)
     end
