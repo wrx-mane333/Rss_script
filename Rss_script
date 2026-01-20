@@ -257,7 +257,7 @@ local function ReachLoop()
         -- Only trigger touch if close enough to minimize firetouchinterest calls
         -- Added debounce to prevent lag from spamming touch events
         local now = tick()
-        if not _LastTouchTime or now - _LastTouchTime > 0.1 then -- Limit to 10Hz
+        if not _LastTouchTime or now - _LastTouchTime > 0.03 then -- Limit to ~30Hz (fast enough for any ball)
             _LastTouchTime = now
             local partsToTouch = {"LeftHand","RightHand","LeftFoot","RightFoot","HumanoidRootPart"}
             for _, name in ipairs(partsToTouch) do
