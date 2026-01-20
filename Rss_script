@@ -111,17 +111,25 @@ local function FindBall()
         end
     end
 
-    -- If not found, do a more expensive search but rarely
-    if now - _LastBallSearch > 2 then
+    -- If not found, do a more expensive search but rarely (every 5 seconds)
+    if now - _LastBallSearch > 5 then
         for _, name in ipairs(names) do
-            local found = Workspace:FindFirstChild(name, true)
-            if found then
-                local part = firstPartFromModel(found)
-                if part then 
-                    _CachedBall = part
-                    return part 
-                end
+            -- Optimization: Avoid full recursive search if possible, check specific folders first
+            local likelyFolders = {Workspace:FindFirstChild("Map"), Workspace:FindFirstChild("Game")}
+            for _, folder in ipairs(likelyFolders) do
+                 local found = folder:FindFirstChild(name, true)
+                 if found then
+                    local part = firstPartFromModel(found)
+                    if part then
+                        _CachedBall = part
+                        return part
+                    end
+                 end
             end
+            
+            -- Only as a last resort scan workspace descendants (very expensive)
+            -- local found = Workspace:FindFirstChild(name, true) 
+            -- Disabled full recursive search to prevent lag spikes
         end
     end
 
@@ -247,14 +255,19 @@ local function ReachLoop()
         if not char then return end
 
         -- Only trigger touch if close enough to minimize firetouchinterest calls
-        local partsToTouch = {"LeftHand","RightHand","LeftFoot","RightFoot","HumanoidRootPart"}
-        for _, name in ipairs(partsToTouch) do
-            local p = char:FindFirstChild(name)
-            if p and p:IsA("BasePart") then
-                pcall(function()
-                    firetouchinterest(p, ball, 0)
-                    firetouchinterest(p, ball, 1)
-                end)
+        -- Added debounce to prevent lag from spamming touch events
+        local now = tick()
+        if not _LastTouchTime or now - _LastTouchTime > 0.1 then -- Limit to 10Hz
+            _LastTouchTime = now
+            local partsToTouch = {"LeftHand","RightHand","LeftFoot","RightFoot","HumanoidRootPart"}
+            for _, name in ipairs(partsToTouch) do
+                local p = char:FindFirstChild(name)
+                if p and p:IsA("BasePart") then
+                    pcall(function()
+                        firetouchinterest(p, ball, 0)
+                        firetouchinterest(p, ball, 1)
+                    end)
+                end
             end
         end
     end
@@ -1495,22 +1508,18 @@ AssistSection:Toggle({
                 end
                 
                 -- Update goal center rarely
-                if tick() - lastCheck > 1 or not cachedGoalCenter then
+                if not cachedGoalCenter or tick() - lastCheck > 10 then
                     lastCheck = tick()
                     local sumPos = Vector3.new(0,0,0)
                     local count = 0
                     local radius = 150
                     
-                    local candidates = {}
                     local folders = {Workspace:FindFirstChild("Map"), Workspace:FindFirstChild("Goals")}
-                    local searchTargets = {}
-                    for _, f in ipairs(folders) do table.insert(searchTargets, f) end
-                    if #searchTargets == 0 then table.insert(searchTargets, Workspace) end
                     
-                    for _, parent in ipairs(searchTargets) do
+                    -- Optimized search: Look in specific folders first
+                    for _, parent in ipairs(folders) do
                         if parent then
-                            local items = (parent == Workspace) and parent:GetChildren() or parent:GetDescendants()
-                            for _, p in ipairs(items) do
+                            for _, p in ipairs(parent:GetDescendants()) do
                                 if p:IsA("BasePart") then
                                     local ln = string.lower(p.Name)
                                     if (string.find(ln, "goal") or string.find(ln, "post") or string.find(ln, "net")) then
@@ -1520,22 +1529,26 @@ AssistSection:Toggle({
                                             count = count + 1
                                         end
                                     end
-                                elseif (p:IsA("Model") or p:IsA("Folder")) and parent == Workspace then
-                                    local ln = string.lower(p.Name)
-                                    if string.find(ln, "goal") or string.find(ln, "net") then
-                                        for _, child in ipairs(p:GetChildren()) do
-                                            if child:IsA("BasePart") then
-                                                local dist = (child.Position - root.Position).Magnitude
-                                                if dist < radius then
-                                                    sumPos = sumPos + child.Position
-                                                    count = count + 1
-                                                end
-                                            end
-                                        end
-                                    end
                                 end
                             end
                         end
+                    end
+                    
+                    -- Fallback only if nothing found in folders
+                    if count == 0 then
+                         for _, p in ipairs(Workspace:GetChildren()) do
+                            if p:IsA("Model") and (string.find(string.lower(p.Name), "goal") or string.find(string.lower(p.Name), "map")) then
+                                for _, child in ipairs(p:GetDescendants()) do
+                                    if child:IsA("BasePart") then
+                                         local dist = (child.Position - root.Position).Magnitude
+                                         if dist < radius then
+                                             sumPos = sumPos + child.Position
+                                             count = count + 1
+                                         end
+                                    end
+                                end
+                            end
+                         end
                     end
                     
                     if count > 0 then
