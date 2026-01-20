@@ -1417,7 +1417,7 @@ AdvancedGKSection:Toggle({
 })
 
 local AssistSection = GkTab:Section({ Title = "Position Assist" })
-local AssistLine = nil
+local AssistPart = nil
 local AssistUpdate = nil
 
 AssistSection:Toggle({
@@ -1426,47 +1426,78 @@ AssistSection:Toggle({
     Default = false,
     Callback = function(v)
         if v then
-            -- Create visual
-            if not AssistLine then
-                AssistLine = Instance.new("LineHandleAdornment")
-                AssistLine.Name = "GKAssistLine"
-                AssistLine.Color3 = Color3.fromRGB(0, 255, 100)
-                AssistLine.Thickness = 5
-                AssistLine.Transparency = 0.3
-                AssistLine.AlwaysOnTop = true
-                AssistLine.ZIndex = 5
-                AssistLine.Parent = Workspace
+            -- Create visual Part (more reliable than Adornment)
+            if not AssistPart then
+                AssistPart = Instance.new("Part")
+                AssistPart.Name = "GKAssistVisual"
+                AssistPart.Material = Enum.Material.Neon
+                AssistPart.CanCollide = false
+                AssistPart.Anchored = true
+                AssistPart.CastShadow = false
+                AssistPart.Color = Color3.fromRGB(0, 255, 100)
+                AssistPart.Transparency = 0.4
+                AssistPart.Size = Vector3.new(0.3, 0.3, 5)
+                AssistPart.Parent = Workspace
             end
             
             local RunService = game:GetService("RunService")
             local lastCheck = 0
             local cachedGoalCenter = nil
+            local notFoundWarned = false
             
             AssistUpdate = RunService.RenderStepped:Connect(function()
                 local root = GetRoot()
-                if not root then AssistLine.Visible = false return end
+                if not root then 
+                    if AssistPart then AssistPart.Transparency = 1 end
+                    return 
+                end
                 
-                -- Update goal center rarely
-                if tick() - lastCheck > 2 or not cachedGoalCenter then
+                -- Update goal center rarely (every 1s)
+                if tick() - lastCheck > 1 or not cachedGoalCenter then
                     lastCheck = tick()
-                    -- Find goal parts near player
+                    -- Find goal parts near player (Search wider radius)
                     local sumPos = Vector3.new(0,0,0)
                     local count = 0
-                    local radius = 60
+                    local radius = 150 -- Increased radius
                     
-                    -- Quick search in likely folders
                     local candidates = {}
+                    -- Try optimized folders first
                     local folders = {Workspace:FindFirstChild("Map"), Workspace:FindFirstChild("Goals")}
-                    if #folders == 0 then folders = {Workspace} end
+                    local searchTargets = {}
+                    for _, f in ipairs(folders) do table.insert(searchTargets, f) end
                     
-                    for _, folder in ipairs(folders) do
-                        if folder then
-                            for _, p in ipairs(folder:GetDescendants()) do
+                    -- If no specific folders, search children of Workspace (shallow) or active parts
+                    if #searchTargets == 0 then
+                         table.insert(searchTargets, Workspace)
+                    end
+                    
+                    for _, parent in ipairs(searchTargets) do
+                        if parent then
+                            -- Limit descendant search if it's the whole workspace to avoid lag
+                            local items = (parent == Workspace) and parent:GetChildren() or parent:GetDescendants()
+                            for _, p in ipairs(items) do
                                 if p:IsA("BasePart") then
                                     local ln = string.lower(p.Name)
-                                    if (string.find(ln, "goal") or string.find(ln, "post")) and (p.Position - root.Position).Magnitude < radius then
-                                        sumPos = sumPos + p.Position
-                                        count = count + 1
+                                    if (string.find(ln, "goal") or string.find(ln, "post") or string.find(ln, "net")) then
+                                        local dist = (p.Position - root.Position).Magnitude
+                                        if dist < radius then
+                                            sumPos = sumPos + p.Position
+                                            count = count + 1
+                                        end
+                                    end
+                                elseif (p:IsA("Model") or p:IsA("Folder")) and parent == Workspace then
+                                    -- Check common model names
+                                    local ln = string.lower(p.Name)
+                                    if string.find(ln, "goal") or string.find(ln, "net") then
+                                        for _, child in ipairs(p:GetChildren()) do
+                                            if child:IsA("BasePart") then
+                                                local dist = (child.Position - root.Position).Magnitude
+                                                if dist < radius then
+                                                    sumPos = sumPos + child.Position
+                                                    count = count + 1
+                                                end
+                                            end
+                                        end
                                     end
                                 end
                             end
@@ -1475,34 +1506,44 @@ AssistSection:Toggle({
                     
                     if count > 0 then
                         cachedGoalCenter = sumPos / count
+                        if notFoundWarned then notFoundWarned = false end
+                    elseif not notFoundWarned and tick() - lastCheck > 3 then
+                         -- Only warn if persistent failure
+                         WindUI:Notify({Title = "Position Assist", Content = "No goal found nearby! Stand closer to goal.", Icon = "alert"})
+                         notFoundWarned = true
                     end
                 end
                 
                 if cachedGoalCenter then
                     -- Ideal position: 5 studs towards field center from goal center
+                    -- Simple heuristic: Field center is roughly (0, Y, 0)
                     local fieldCenter = Vector3.new(0, cachedGoalCenter.Y, 0)
                     local dir = (fieldCenter - cachedGoalCenter).Unit
                     local ideal = cachedGoalCenter + dir * 6 -- Stand 6 studs out
-                    -- keep Y at player level
-                    ideal = Vector3.new(ideal.X, root.Position.Y, ideal.Z)
                     
-                    AssistLine.Adornee = root
-                    AssistLine.Length = (root.Position - ideal).Magnitude
-                    AssistLine.CFrame = CFrame.lookAt(root.Position, ideal)
-                    AssistLine.Visible = true
+                    -- Force Y to player height to keep line flat
+                    ideal = Vector3.new(ideal.X, root.Position.Y - 1, ideal.Z)
+                    local startPos = root.Position + Vector3.new(0, -1, 0)
                     
-                    if AssistLine.Length < 3 then
-                         AssistLine.Color3 = Color3.fromRGB(0, 255, 0) -- Perfect
+                    local dist = (startPos - ideal).Magnitude
+                    local mid = (startPos + ideal) / 2
+                    
+                    AssistPart.Size = Vector3.new(0.4, 0.4, dist)
+                    AssistPart.CFrame = CFrame.lookAt(mid, ideal)
+                    AssistPart.Transparency = 0.4
+                    
+                    if dist < 3 then
+                         AssistPart.Color = Color3.fromRGB(0, 255, 0) -- Perfect
                     else
-                         AssistLine.Color3 = Color3.fromRGB(255, 100, 0) -- Move!
+                         AssistPart.Color = Color3.fromRGB(255, 100, 0) -- Move!
                     end
                 else
-                    AssistLine.Visible = false
+                    AssistPart.Transparency = 1
                 end
             end)
         else
             if AssistUpdate then AssistUpdate:Disconnect() AssistUpdate = nil end
-            if AssistLine then AssistLine:Destroy() AssistLine = nil end
+            if AssistPart then AssistPart:Destroy() AssistPart = nil end
         end
     end
 })
