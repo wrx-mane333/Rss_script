@@ -1198,97 +1198,6 @@ local AdvancedGKSection = GkTab:Section({
     Title = "Auto GK V2 (Predictive)"
 })
 
-local AssistSection = GkTab:Section({ Title = "Position Assist" })
-local AssistLine = nil
-local AssistUpdate = nil
-
-AssistSection:Toggle({
-    Title = "Enable Position Guide",
-    Desc = "Green line shows optimal GK positioning",
-    Default = false,
-    Callback = function(v)
-        if v then
-            -- Create visual
-            if not AssistLine then
-                AssistLine = Instance.new("LineHandleAdornment")
-                AssistLine.Name = "GKAssistLine"
-                AssistLine.Color3 = Color3.fromRGB(0, 255, 100)
-                AssistLine.Thickness = 5
-                AssistLine.Transparency = 0.3
-                AssistLine.AlwaysOnTop = true
-                AssistLine.ZIndex = 5
-                AssistLine.Parent = Workspace
-            end
-            
-            local RunService = game:GetService("RunService")
-            local lastCheck = 0
-            local cachedGoalCenter = nil
-            
-            AssistUpdate = RunService.RenderStepped:Connect(function()
-                local root = GetRoot()
-                if not root then AssistLine.Visible = false return end
-                
-                -- Update goal center rarely
-                if tick() - lastCheck > 2 or not cachedGoalCenter then
-                    lastCheck = tick()
-                    -- Find goal parts near player
-                    local sumPos = Vector3.new(0,0,0)
-                    local count = 0
-                    local radius = 60
-                    
-                    -- Quick search in likely folders
-                    local candidates = {}
-                    local folders = {Workspace:FindFirstChild("Map"), Workspace:FindFirstChild("Goals")}
-                    if #folders == 0 then folders = {Workspace} end
-                    
-                    for _, folder in ipairs(folders) do
-                        if folder then
-                            for _, p in ipairs(folder:GetDescendants()) do
-                                if p:IsA("BasePart") then
-                                    local ln = string.lower(p.Name)
-                                    if (string.find(ln, "goal") or string.find(ln, "post")) and (p.Position - root.Position).Magnitude < radius then
-                                        sumPos = sumPos + p.Position
-                                        count = count + 1
-                                    end
-                                end
-                            end
-                        end
-                    end
-                    
-                    if count > 0 then
-                        cachedGoalCenter = sumPos / count
-                    end
-                end
-                
-                if cachedGoalCenter then
-                    -- Ideal position: 5 studs towards field center from goal center
-                    local fieldCenter = Vector3.new(0, cachedGoalCenter.Y, 0)
-                    local dir = (fieldCenter - cachedGoalCenter).Unit
-                    local ideal = cachedGoalCenter + dir * 6 -- Stand 6 studs out
-                    -- keep Y at player level
-                    ideal = Vector3.new(ideal.X, root.Position.Y, ideal.Z)
-                    
-                    AssistLine.Adornee = root
-                    AssistLine.Length = (root.Position - ideal).Magnitude
-                    AssistLine.CFrame = CFrame.lookAt(root.Position, ideal)
-                    AssistLine.Visible = true
-                    
-                    if AssistLine.Length < 3 then
-                         AssistLine.Color3 = Color3.fromRGB(0, 255, 0) -- Perfect
-                    else
-                         AssistLine.Color3 = Color3.fromRGB(255, 100, 0) -- Move!
-                    end
-                else
-                    AssistLine.Visible = false
-                end
-            end)
-        else
-            if AssistUpdate then AssistUpdate:Disconnect() AssistUpdate = nil end
-            if AssistLine then AssistLine:Destroy() AssistLine = nil end
-        end
-    end
-})
-
 local GKSettings = {
     CloseDist = 15,
     FarDist = 35,
@@ -1504,6 +1413,97 @@ AdvancedGKSection:Toggle({
                 end
             end
         end)
+    end
+})
+
+local AssistSection = GkTab:Section({ Title = "Position Assist" })
+local AssistLine = nil
+local AssistUpdate = nil
+
+AssistSection:Toggle({
+    Title = "Enable Position Guide",
+    Desc = "Green line shows optimal GK positioning",
+    Default = false,
+    Callback = function(v)
+        if v then
+            -- Create visual
+            if not AssistLine then
+                AssistLine = Instance.new("LineHandleAdornment")
+                AssistLine.Name = "GKAssistLine"
+                AssistLine.Color3 = Color3.fromRGB(0, 255, 100)
+                AssistLine.Thickness = 5
+                AssistLine.Transparency = 0.3
+                AssistLine.AlwaysOnTop = true
+                AssistLine.ZIndex = 5
+                AssistLine.Parent = Workspace
+            end
+            
+            local RunService = game:GetService("RunService")
+            local lastCheck = 0
+            local cachedGoalCenter = nil
+            
+            AssistUpdate = RunService.RenderStepped:Connect(function()
+                local root = GetRoot()
+                if not root then AssistLine.Visible = false return end
+                
+                -- Update goal center rarely
+                if tick() - lastCheck > 2 or not cachedGoalCenter then
+                    lastCheck = tick()
+                    -- Find goal parts near player
+                    local sumPos = Vector3.new(0,0,0)
+                    local count = 0
+                    local radius = 60
+                    
+                    -- Quick search in likely folders
+                    local candidates = {}
+                    local folders = {Workspace:FindFirstChild("Map"), Workspace:FindFirstChild("Goals")}
+                    if #folders == 0 then folders = {Workspace} end
+                    
+                    for _, folder in ipairs(folders) do
+                        if folder then
+                            for _, p in ipairs(folder:GetDescendants()) do
+                                if p:IsA("BasePart") then
+                                    local ln = string.lower(p.Name)
+                                    if (string.find(ln, "goal") or string.find(ln, "post")) and (p.Position - root.Position).Magnitude < radius then
+                                        sumPos = sumPos + p.Position
+                                        count = count + 1
+                                    end
+                                end
+                            end
+                        end
+                    end
+                    
+                    if count > 0 then
+                        cachedGoalCenter = sumPos / count
+                    end
+                end
+                
+                if cachedGoalCenter then
+                    -- Ideal position: 5 studs towards field center from goal center
+                    local fieldCenter = Vector3.new(0, cachedGoalCenter.Y, 0)
+                    local dir = (fieldCenter - cachedGoalCenter).Unit
+                    local ideal = cachedGoalCenter + dir * 6 -- Stand 6 studs out
+                    -- keep Y at player level
+                    ideal = Vector3.new(ideal.X, root.Position.Y, ideal.Z)
+                    
+                    AssistLine.Adornee = root
+                    AssistLine.Length = (root.Position - ideal).Magnitude
+                    AssistLine.CFrame = CFrame.lookAt(root.Position, ideal)
+                    AssistLine.Visible = true
+                    
+                    if AssistLine.Length < 3 then
+                         AssistLine.Color3 = Color3.fromRGB(0, 255, 0) -- Perfect
+                    else
+                         AssistLine.Color3 = Color3.fromRGB(255, 100, 0) -- Move!
+                    end
+                else
+                    AssistLine.Visible = false
+                end
+            end)
+        else
+            if AssistUpdate then AssistUpdate:Disconnect() AssistUpdate = nil end
+            if AssistLine then AssistLine:Destroy() AssistLine = nil end
+        end
     end
 })
 
