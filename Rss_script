@@ -14,42 +14,58 @@ getgenv().InfiniteStaminaEnabled = false
 
 local function CreateHitbox()
     if RSSHitbox then RSSHitbox:Destroy() end
-
-    RSSHitbox = Instance.new("BoxHandleAdornment")
+    RSSHitbox = Instance.new("Folder")
     RSSHitbox.Name = "RSSHitbox"
-    RSSHitbox.AlwaysOnTop = false
-    RSSHitbox.ZIndex = 10
-    RSSHitbox.Color3 = Color3.fromRGB(0, 255, 0)
-    RSSHitbox.Transparency = 1
-    RSSHitbox.Size = HitboxSize
-    RSSHitbox.Adornee = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
-    RSSHitbox.Parent = Workspace.Terrain
+    RSSHitbox.Parent = Workspace
 
-    local Glow = Instance.new("BoxHandleAdornment")
-    Glow.Name = "Glow"
-    Glow.AlwaysOnTop = true
-    Glow.ZIndex = 0
-    Glow.Color3 = Color3.fromRGB(0, 255, 100)
-    Glow.Transparency = 1
-    Glow.Size = HitboxSize * 1
-    Glow.Parent = RSSHitbox
+    -- Outer ring (subtle)
+    local outer = Instance.new("BoxHandleAdornment")
+    outer.Name = "Outer"
+    outer.AlwaysOnTop = false
+    outer.ZIndex = 1
+    outer.Color3 = Color3.fromRGB(0, 150, 255)
+    outer.Transparency = 1
+    outer.Size = HitboxSize * 1.15
+    outer.Adornee = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+    outer.Parent = RSSHitbox
+
+    -- Inner core (more visible)
+    local core = Instance.new("BoxHandleAdornment")
+    core.Name = "Core"
+    core.AlwaysOnTop = true
+    core.ZIndex = 2
+    core.Color3 = Color3.fromRGB(0, 255, 100)
+    core.Transparency = 1
+    core.Size = HitboxSize
+    core.Adornee = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+    core.Parent = RSSHitbox
+
+    -- Pulse helper to animate when visible
+    local pulse = Instance.new("BoolValue")
+    pulse.Name = "Pulse"
+    pulse.Value = false
+    pulse.Parent = RSSHitbox
 end
 
 local function UpdateHitbox()
-    if not RSSHitbox then return end
-    
-    RSSHitbox.Size = HitboxSize
-    local Glow = RSSHitbox:FindFirstChild("Glow")
-    if Glow then 
-        Glow.Size = HitboxSize * 1
+    if not RSSHitbox or not RSSHitbox.Parent then return end
+
+    local outer = RSSHitbox:FindFirstChild("Outer")
+    local core = RSSHitbox:FindFirstChild("Core")
+
+    if outer then
+        outer.Size = HitboxSize * 1.15
+        outer.Adornee = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+    end
+
+    if core then
+        core.Size = HitboxSize
+        core.Adornee = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
     end
 
     local shouldShow = IsReachEnabled and IsVisualizerEnabled
-    
-    RSSHitbox.Transparency = shouldShow and 1 or 1
-    if Glow then 
-        Glow.Transparency = shouldShow and 0.7 or 1
-    end
+    if outer then outer.Transparency = shouldShow and 0.85 or 1 end
+    if core then core.Transparency = shouldShow and 0.55 or 1 end
 end
 
 local function GetRoot() 
@@ -57,30 +73,69 @@ local function GetRoot()
 end
 
 local function FindBall()
-    local b = Workspace:FindFirstChild("ball")
-    if b and b:IsA("BasePart") then return b end
+    -- Robust ball finder: checks common names and models, returns a BasePart representing the ball
+    local function firstPartFromModel(m)
+        if not m then return nil end
+        if m:IsA("BasePart") then return m end
+        if m.PrimaryPart and m.PrimaryPart:IsA("BasePart") then return m.PrimaryPart end
+        for _, c in ipairs(m:GetDescendants()) do
+            if c:IsA("BasePart") then return c end
+        end
+        return nil
+    end
+
+    local names = {"ball", "Ball", "PSoccerBall", "TPS", "SoccerBall"}
+    for _, name in ipairs(names) do
+        local found = Workspace:FindFirstChild(name, true)
+        if found then
+            local part = firstPartFromModel(found)
+            if part then return part end
+        end
+    end
+
+    -- fallback: search for a floating spherical part with expected size
+    for _, part in ipairs(Workspace:GetDescendants()) do
+        if part:IsA("BasePart") and (part.Shape == Enum.PartType.Ball or (part.Mesh and string.find(string.lower(part.Name), "ball") )) then
+            return part
+        end
+    end
+
+    return nil
 end
 
 local function ReachLoop()
     local root = GetRoot()
     if not root or not RSSHitbox then return end
-
-    RSSHitbox.Adornee = root
-    local Glow = RSSHitbox:FindFirstChild("Glow")
-    if Glow then Glow.Adornee = root end
+    local outer = RSSHitbox:FindFirstChild("Outer")
+    local core = RSSHitbox:FindFirstChild("Core")
+    if outer then outer.Adornee = root end
+    if core then core.Adornee = root end
 
     local ball = FindBall()
-    if not ball then return end
+    if not ball or not ball.Position then return end
 
-    local effectiveReach = math.max(HitboxSize.X, HitboxSize.Y, HitboxSize.Z) / 2
+    local effectiveReach = math.max(HitboxSize.X, HitboxSize.Y, HitboxSize.Z) * 0.6
 
     if (ball.Position - root.Position).Magnitude <= effectiveReach then
-        for _, part in LocalPlayer.Character:GetChildren() do
-            if part:IsA("BasePart") then
-                firetouchinterest(part, ball, 0)
-                task.wait()
-                firetouchinterest(part, ball, 1)
+        -- only touch a few key parts to reduce anti-cheat noise
+        local partsToTouch = {}
+        local char = LocalPlayer.Character
+        if char then
+            for _, name in ipairs({"LeftHand","RightHand","LeftFoot","RightFoot","HumanoidRootPart","LowerTorso"}) do
+                local p = char:FindFirstChild(name)
+                if p and p:IsA("BasePart") then table.insert(partsToTouch, p) end
             end
+            if #partsToTouch == 0 then
+                for _, p in ipairs(char:GetChildren()) do if p:IsA("BasePart") then table.insert(partsToTouch, p) end end
+            end
+        end
+
+        for _, part in ipairs(partsToTouch) do
+            pcall(function()
+                firetouchinterest(part, ball, 0)
+                task.wait(0.012)
+                firetouchinterest(part, ball, 1)
+            end)
         end
     end
 end
@@ -226,6 +281,15 @@ MainSection:Toggle({
         IsVisualizerEnabled = v
         UpdateHitbox()
     end
+})
+
+MainSection:Toggle({
+    Title = "Performance Optimizer",
+    Desc = "Disable particle effects / lights and pause predictor to reduce client lag",
+    Default = false,
+    Callback = function(v)
+        ApplyOptimizations(v)
+    end,
 })
 
 MainTab:Space()
@@ -751,6 +815,83 @@ PredictSection:Toggle({
 })
 CreateHitbox()
 UpdateHitbox()
+
+-- Performance optimization: disable client-side heavy effects and optionally pause predictor/visuals
+local OptimizationsApplied = false
+local savedStates = {}
+local wasPredictorEnabled = false
+
+local function disableEffects()
+    savedStates = {particles = {}, trails = {}, beams = {}, lights = {}}
+    for _, obj in ipairs(Workspace:GetDescendants()) do
+        pcall(function()
+            if obj:IsA("ParticleEmitter") then
+                savedStates.particles[obj] = obj.Enabled
+                obj.Enabled = false
+            elseif obj:IsA("Trail") then
+                savedStates.trails[obj] = obj.Enabled
+                obj.Enabled = false
+            elseif obj:IsA("Beam") then
+                savedStates.beams[obj] = obj.Enabled
+                obj.Enabled = false
+            elseif obj:IsA("PointLight") or obj:IsA("SpotLight") or obj:IsA("SurfaceLight") then
+                savedStates.lights[obj] = obj.Enabled
+                obj.Enabled = false
+            end
+        end)
+    end
+
+    -- attempt to reduce Lighting costs
+    pcall(function()
+        local Lighting = game:GetService("Lighting")
+        savedStates.lighting = {GlobalShadows = Lighting.GlobalShadows, Brightness = Lighting.Brightness}
+        Lighting.GlobalShadows = false
+        Lighting.Brightness = math.max(0.5, Lighting.Brightness * 0.5)
+    end)
+end
+
+local function restoreEffects()
+    for obj, state in pairs(savedStates.particles or {}) do pcall(function() obj.Enabled = state end) end
+    for obj, state in pairs(savedStates.trails or {}) do pcall(function() obj.Enabled = state end) end
+    for obj, state in pairs(savedStates.beams or {}) do pcall(function() obj.Enabled = state end) end
+    for obj, state in pairs(savedStates.lights or {}) do pcall(function() obj.Enabled = state end) end
+    if savedStates.lighting then
+        pcall(function()
+            local Lighting = game:GetService("Lighting")
+            Lighting.GlobalShadows = savedStates.lighting.GlobalShadows
+            Lighting.Brightness = savedStates.lighting.Brightness
+        end)
+    end
+    savedStates = {}
+end
+
+local function ApplyOptimizations(enable)
+    if enable and not OptimizationsApplied then
+        -- pause predictor if running
+        if predictionConnection then
+            wasPredictorEnabled = true
+            pcall(function() predictionConnection:Disconnect() end)
+            predictionConnection = nil
+        else
+            wasPredictorEnabled = false
+        end
+
+        disableEffects()
+        -- hide heavy visuals
+        IsVisualizerEnabled = false
+        UpdateHitbox()
+        OptimizationsApplied = true
+        WindUI:Notify({Title = "Optimizer", Content = "Optimizations applied", Icon = "zap"})
+    elseif not enable and OptimizationsApplied then
+        restoreEffects()
+        if wasPredictorEnabled then
+            -- user can re-enable predictor via UI toggle; we avoid auto-starting to be safe
+            WindUI:Notify({Title = "Optimizer", Content = "Predictor was running before; re-enable it from UI if needed", Icon = "info"})
+        end
+        OptimizationsApplied = false
+        WindUI:Notify({Title = "Optimizer", Content = "Optimizations removed", Icon = "check"})
+    end
+end
 
 local PlayerTab = Window:Tab({
     Title = "Player",
