@@ -1289,6 +1289,31 @@ AdvancedGKSection:Slider({
 })
 
 AdvancedGKSection:Toggle({
+    Title = "Auto Face Ball",
+    Desc = "Keeps you facing the ball for easier saves",
+    Default = false,
+    Callback = function(v)
+        if v then
+            local RunService = game:GetService("RunService")
+            getgenv().AutoFaceConnection = RunService.RenderStepped:Connect(function()
+                local ball = FindBall()
+                local root = GetRoot()
+                if ball and root then
+                    -- Only rotate Y axis to avoid tilting
+                    local targetPos = Vector3.new(ball.Position.X, root.Position.Y, ball.Position.Z)
+                    root.CFrame = CFrame.lookAt(root.Position, targetPos)
+                end
+            end)
+        else
+            if getgenv().AutoFaceConnection then
+                getgenv().AutoFaceConnection:Disconnect()
+                getgenv().AutoFaceConnection = nil
+            end
+        end
+    end
+})
+
+AdvancedGKSection:Toggle({
     Title = "Enable Auto GK V2",
     Desc = "Predicts and dives towards ball landing",
     Default = false,
@@ -1374,13 +1399,19 @@ AdvancedGKSection:Toggle({
             end
         end
 
+        -- Enhanced physics prediction for Auto GK
         local function predictLanding(pos, vel)
             local g = Vector3.new(0, -196.2, 0)
             local p = pos
             local v = vel
+            -- Physics constants matching the visualizer
+            local airResistance = 0.99 
+            local dt = STEP
+            local gravityDt = g * dt
+            local airResStep = airResistance ^ dt
+
             for t = 0, GKSettings.Lookahead, STEP do
-                local dt = STEP
-                v = v + g * dt
+                v = (v + gravityDt) * airResStep -- Apply drag
                 p = p + v * dt
                 if p.Y <= 3 then -- near ground
                     return p
@@ -1393,10 +1424,14 @@ AdvancedGKSection:Toggle({
              local g = Vector3.new(0, -196.2, 0)
              local p = pos
              local v = vel
+             local airResistance = 0.99
+             local dt = STEP
+             local gravityDt = g * dt
+             local airResStep = airResistance ^ dt
+
              -- Check peak height within lookahead
              for t = 0, GKSettings.Lookahead, STEP do
-                 local dt = STEP
-                 v = v + g * dt
+                 v = (v + gravityDt) * airResStep
                  p = p + v * dt
                  -- If ball is high (e.g. > 7 studs) and near goal
                  if p.Y > 7 and p.Y < 15 then 
