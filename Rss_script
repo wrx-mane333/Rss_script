@@ -376,17 +376,17 @@ end
 
 -- GK UI Sections
 local DetectionSection = GkTab:Section({ Title = "Settings" })
-DetectionSection:Slider({ Title = "Detection Range V1", Step = 1, Value = {Min = 20, Max = 50, Default = 30}, Callback = function(v) DIVE_DISTANCE_REGULAR = v end })
-DetectionSection:Slider({ Title = "Detection Range V2", Step = 1, Value = {Min = 25, Max = 60, Default = 45}, Callback = function(v) GKV2_DETECTION_DISTANCE = v end })
-DetectionSection:Slider({ Title = "Min Ball Speed V1", Step = 0.5, Value = {Min = 3, Max = 12, Default = 5}, Callback = function(v) MIN_BALL_SPEED_REGULAR = v end })
-DetectionSection:Slider({ Title = "Min Ball Speed V2", Step = 0.5, Value = {Min = 3, Max = 12, Default = 6}, Callback = function(v) GKV2_MIN_BALL_SPEED = v end })
-DetectionSection:Slider({ Title = "Dive Cooldown", Step = 0.05, Value = {Min = 0.2, Max = 1.0, Default = 0.4}, Callback = function(v) DIVE_COOLDOWN_REGULAR = v; GKV2_DIVE_COOLDOWN = v end })
+DetectionSection:Slider({ Title = "Detection Range V1", Step = 1, Value = {Min = 20, Max = 50, Default = 35}, Callback = function(v) DIVE_DISTANCE_REGULAR = v end })
+DetectionSection:Slider({ Title = "Detection Range V2", Step = 1, Value = {Min = 25, Max = 60, Default = 55}, Callback = function(v) GKV2_DETECTION_DISTANCE = v end })
+DetectionSection:Slider({ Title = "Min Ball Speed V1", Step = 0.5, Value = {Min = 1, Max = 12, Default = 3}, Callback = function(v) MIN_BALL_SPEED_REGULAR = v end })
+DetectionSection:Slider({ Title = "Min Ball Speed V2", Step = 0.5, Value = {Min = 1, Max = 12, Default = 4}, Callback = function(v) GKV2_MIN_BALL_SPEED = v end })
+DetectionSection:Slider({ Title = "Dive Cooldown", Step = 0.05, Value = {Min = 0.1, Max = 1.0, Default = 0.25}, Callback = function(v) DIVE_COOLDOWN_REGULAR = v; GKV2_DIVE_COOLDOWN = v end })
 
 local TuningSection = GkTab:Section({ Title = "Fine Tuning" })
 TuningSection:Slider({ Title = "Prediction Time V1", Step = 0.02, Value = {Min = 0.1, Max = 0.4, Default = 0.25}, Callback = function(v) PREDICTION_TIME_REGULAR = v end })
 TuningSection:Slider({ Title = "Goal Distance 4v4", Step = 1, Value = {Min = 15, Max = 40, Default = 35}, Callback = function(v) GKV2_NEAR_GOAL_DISTANCE_4v4 = v end })
 TuningSection:Slider({ Title = "Goal Distance 7v7", Step = 1, Value = {Min = 30, Max = 60, Default = 55}, Callback = function(v) GKV2_NEAR_GOAL_DISTANCE_7v7 = v end })
-TuningSection:Slider({ Title = "Reaction Speed", Step = 0.02, Value = {Min = 0.15, Max = 0.6, Default = 0.25}, Callback = function(v) DIVE_COOLDOWN_REGULAR = v; GKV2_DIVE_COOLDOWN = v end })
+TuningSection:Slider({ Title = "Reaction Speed", Step = 0.02, Value = {Min = 0.1, Max = 0.6, Default = 0.25}, Callback = function(v) DIVE_COOLDOWN_REGULAR = v; GKV2_DIVE_COOLDOWN = v end })
 
 local GKV2Section = GkTab:Section({ Title = "Auto GK V2 (Advanced)" })
 
