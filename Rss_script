@@ -757,46 +757,45 @@ local function FindDefendedGoal()
     end
     
     if #candidates == 0 then return nil end
-
-    -- Cluster candidates by distance to player to find the "nearest goal structure"
-    -- We assume the goal parts are clustered together (posts, net, etc.)
-    local closestPart = nil
-    local minDst = math.huge
-    
-    for _, p in ipairs(candidates) do
-        local d = (p.Position - root.Position).Magnitude
-        if d < minDst then
-            minDst = d
-            closestPart = p
-        end
-    end
-    
-    if not closestPart then return nil end
-    
-    -- Now find all parts close to this closest part (e.g. within 30 studs) to form the "Defended Goal"
-    local goalParts = {}
-    for _, p in ipairs(candidates) do
-        if (p.Position - closestPart.Position).Magnitude < 30 then
-            table.insert(goalParts, p)
-        end
-    end
-    
-    -- Calculate center of this specific goal
-    local minV = Vector3.new(1e9,1e9,1e9)
-    local maxV = Vector3.new(-1e9,-1e9,-1e9)
-    for _, p in ipairs(goalParts) do
-        local size = p.Size * 0.5
-        local cpos = p.Position
-        local a = cpos - size
-        local b = cpos + size
-        minV = Vector3.new(math.min(minV.X, a.X), math.min(minV.Y, a.Y), math.min(minV.Z, a.Z))
-        maxV = Vector3.new(math.max(maxV.X, b.X), math.max(maxV.Y, b.Y), math.max(maxV.Z, b.Z))
-    end
-    
-    local center = (minV + maxV) / 2
-    -- Adjust center Y to be ground level-ish if needed, but for positioning X/Z matters most
-    return center
-end
+ 
+     -- Cluster candidates by distance to player to find the "nearest goal structure"
+     -- We assume the goal parts are clustered together (posts, net, etc.)
+     local closestPart = nil
+     local minDst = math.huge
+     
+     for _, p in ipairs(candidates) do
+         local d = (p.Position - root.Position).Magnitude
+         if d < minDst then
+             minDst = d
+             closestPart = p
+         end
+     end
+     
+     if not closestPart then return root.Position end -- Fallback to player pos if detection fails logic
+     
+     -- Now find all parts close to this closest part (e.g. within 30 studs) to form the "Defended Goal"
+     local goalParts = {}
+     for _, p in ipairs(candidates) do
+         if (p.Position - closestPart.Position).Magnitude < 30 then
+             table.insert(goalParts, p)
+         end
+     end
+     
+     -- Calculate center of this specific goal
+     local minV = Vector3.new(1e9,1e9,1e9)
+     local maxV = Vector3.new(-1e9,-1e9,-1e9)
+     for _, p in ipairs(goalParts) do
+         local size = p.Size * 0.5
+         local cpos = p.Position
+         local a = cpos - size
+         local b = cpos + size
+         minV = Vector3.new(math.min(minV.X, a.X), math.min(minV.Y, a.Y), math.min(minV.Z, a.Z))
+         maxV = Vector3.new(math.max(maxV.X, b.X), math.max(maxV.Y, b.Y), math.max(maxV.Z, b.Z))
+     end
+     
+     local center = (minV + maxV) / 2
+     return center
+ end
 
 -- UI Construction
 local Window = WindUI:CreateWindow({
@@ -989,6 +988,7 @@ GKMain:Toggle({
 
         local lastAutoGKV2Check = 0
         local lastPosUpdate = 0
+        local lastMoveTarget = Vector3.new()
         
         getgenv().AutoGKV2Connection = RunService.Heartbeat:Connect(function()
             local now = tick()
@@ -1000,8 +1000,8 @@ GKMain:Toggle({
                 
                 -- Only update position if not diving (cooldown check approx)
                 if hum and root and now - lastDive > 0.6 then 
-                     -- Determine Defended Goal (update occasionally or if nil)
-                     if not DefendedGoalCenter or now - lastPosUpdate > 5 then
+                     -- Determine Defended Goal (update more frequently: 2s)
+                     if not DefendedGoalCenter or now - lastPosUpdate > 2 then
                          DefendedGoalCenter = FindDefendedGoal()
                          lastPosUpdate = now
                      end
@@ -1020,9 +1020,18 @@ GKMain:Toggle({
                          
                          local targetPos = goalPosFlat + dir * (GKSettings.PositionDist or 6)
                          
-                         -- Move if far enough
-                         if (targetPos - root.Position).Magnitude > 1.5 then
+                         -- Sensitivity check: Only MoveTo if target changed > 0.2 studs OR we are far from target (> 0.5)
+                         -- This prevents micro-stuttering but allows responsive movement
+                         local distToTarget = (targetPos - root.Position).Magnitude
+                         local targetDiff = (targetPos - lastMoveTarget).Magnitude
+                         
+                         if targetDiff > 0.2 or distToTarget > 0.5 then
                              hum:MoveTo(targetPos)
+                             lastMoveTarget = targetPos
+                             
+                             -- Face ball while walking
+                             local faceTarget = Vector3.new(ballPos.X, root.Position.Y, ballPos.Z)
+                             root.CFrame = CFrame.lookAt(root.Position, faceTarget)
                          end
                      end
                 end
