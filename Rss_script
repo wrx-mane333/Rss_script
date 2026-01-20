@@ -4,7 +4,6 @@ local Workspace = game:GetService("Workspace")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local UserInputService = game:GetService("UserInputService")
 local LocalPlayer = Players.LocalPlayer
-
 -- ===== CONFIGURATION =====
 local ReachDistance = 1
 local IsReachEnabled = false
@@ -226,7 +225,36 @@ LocalPlayer.CharacterAdded:Connect(function()
 end)
 
 -- ===== UI SETUP =====
-local WindUI = loadstring(game:HttpGet("https://raw.githubusercontent.com/Footagesus/WindUI/refs/heads/main/dist/main.lua"))()
+-- ===== UI SETUP =====
+local WindUI = nil
+local ok, ui = pcall(function()
+    return loadstring(game:HttpGet("https://raw.githubusercontent.com/Footagesus/WindUI/refs/heads/main/dist/main.lua"))()
+end)
+if ok and ui then
+    WindUI = ui
+else
+    warn("WindUI failed to load, using minimal stub UI - interactive UI may be limited")
+    WindUI = {
+        CreateWindow = function(opts)
+            local Window = {}
+            function Window:Tab(t) 
+                local Tab = {}
+                function Tab:Section(s)
+                    local Section = {}
+                    function Section:Toggle(tbl) end
+                    function Section:Slider(tbl) end
+                    function Section:Dropdown(tbl) end
+                    function Section:Label(txt) end
+                    function Section:Space() end
+                    return Section
+                end
+                return Tab
+            end
+            return Window
+        end,
+        Notify = function(...) end
+    }
+end
 
 local Window = WindUI:CreateWindow({
     Title = "⚽ RSS MOBILE GK",
