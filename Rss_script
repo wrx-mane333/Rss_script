@@ -16,6 +16,7 @@ getgenv().InfiniteStaminaEnabled = false
 local _CachedBall = nil
 local _CachedGoalBounds = nil
 local _LastBallSearch = 0
+local PlayerGameMode = "7v7" -- режим по умолчанию: 7v7 или 4v4
 
 local function CreateHitbox()
     if RSSHitbox then RSSHitbox:Destroy() end
@@ -593,6 +594,18 @@ local AutoPickSection = GkTab:Section({
 })
 
 AutoPickSection:Dropdown({
+    Title = "Game Mode",
+    Desc = "Choose match mode (4v4 or 7v7)",
+    Values = {"4v4", "7v7"},
+    Value = "7v7",
+    Multi = false,
+    Callback = function(mode)
+        PlayerGameMode = mode or "7v7"
+        WindUI:Notify({Title = "Mode", Content = "Set to " .. PlayerGameMode, Icon = "target"})
+    end
+})
+
+AutoPickSection:Dropdown({
     Title = "Choose Team",
     Desc = "USE THIS WHEN NO GK IN TEAM",
     Values = {"Home GK", "Away GK"},
@@ -633,131 +646,6 @@ AutoPickSection:Dropdown({
 local DiveSection = GkTab:Section({
         Title = "Auto Dive"
     })
-
-local DiveToggle = DiveSection:Toggle({
-    Title = "Auto Dive [BETA|MIGHT BUG]",
-    Desc = "USE THIS WHEN BEING GK",
-    Default = false,
-    Callback = function(enabled)
-        local RunService = game:GetService("RunService")
-
-        local Character = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
-        local HumanoidRootPart = Character:WaitForChild("HumanoidRootPart")
-
-        -- cleanup existing connection
-        if getgenv().AutoDiveConnection then
-            pcall(function() getgenv().AutoDiveConnection:Disconnect() end)
-            getgenv().AutoDiveConnection = nil
-        end
-
-        if not enabled then return end
-
-        -- Ensure mutual exclusion: disable Auto GK V2 if it's running
-        if getgenv().AutoGKV2Connection then
-            pcall(function() getgenv().AutoGKV2Connection:Disconnect() end)
-            getgenv().AutoGKV2Connection = nil
-            pcall(function() WindUI:Notify({Title = "Auto GK", Content = "Auto GK V2 disabled to avoid conflicts", Icon = "info"}) end)
-        end
-        getgenv().AutoGKMode = "V1"
-
-        local DIVE_DISTANCE = 10.5
-        local DIVE_COOLDOWN = 0.65
-        local SMART_DIVE = true
-
-        local lastDiveTime = 0
-
-        local function safeFindDiveButtons()
-            local ok, gui = pcall(function()
-                return LocalPlayer:WaitForChild("PlayerGui", 5)
-            end)
-            if not ok or not gui then return nil end
-
-            local candidates = {
-                {"MobileCTRL","TouchControlFrame","JumpButton"},
-                {"MobileControls","TouchFrame","JumpBtn"},
-                {"MobileCTRL","TouchControlFrame","DPad"},
-            }
-
-            for _, path in ipairs(candidates) do
-                local node = gui
-                for _, name in ipairs(path) do
-                    node = node:FindFirstChild(name)
-                    if not node then break end
-                end
-                if node then
-                    local left = node:FindFirstChild("LeftDive") or node:FindFirstChild("Left")
-                    local right = node:FindFirstChild("RightDive") or node:FindFirstChild("Right")
-                    if left and right then
-                        return left, right
-                    end
-                end
-            end
-
-            return nil
-        end
-
-        local function tryClick(btn)
-            if not btn then return end
-            pcall(function()
-                local conns = (getconnections and pcall(getconnections, btn.MouseButton1Click) and getconnections(btn.MouseButton1Click)) or nil
-                if type(conns) == "table" and #conns > 0 and type(conns[1].Fire) == 'function' then
-                    conns[1]:Fire()
-                    return
-                end
-
-                if btn.MouseButton1Click and type(btn.MouseButton1Click.Fire) == 'function' then
-                    btn.MouseButton1Click:Fire()
-                end
-            end)
-        end
-
-        local leftBtn, rightBtn = safeFindDiveButtons()
-
-        local function autoDive(ballPosition)
-            local now = tick()
-            if now - lastDiveTime < DIVE_COOLDOWN then return end
-
-            if SMART_DIVE and HumanoidRootPart and ballPosition then
-                local localPos = HumanoidRootPart.CFrame:PointToObjectSpace(ballPosition)
-                if localPos.X < 0 then
-                    tryClick(leftBtn)
-                else
-                    tryClick(rightBtn)
-                end
-            else
-                tryClick(leftBtn)
-            end
-
-            lastDiveTime = now
-        end
-
-        local lastAutoDiveCheck = 0
-        getgenv().AutoDiveConnection = RunService.Heartbeat:Connect(function()
-            local now = tick()
-            if now - lastAutoDiveCheck < 0.06 then return end -- throttle checks to ~16Hz
-            lastAutoDiveCheck = now
-
-            local ball, bp, bv = GetBallData()
-            if not ball or not bp then return end
-
-            -- if ball heading into goal, be more aggressive
-            local heading, landingPos = isBallHeadingToGoal(ball, bv, 2.2)
-            local distance = (HumanoidRootPart.Position - bp).Magnitude
-
-            if heading then
-                -- if heading, react even from farther away
-                if distance <= DIVE_DISTANCE * 1.8 then
-                    autoDive(landingPos or bp)
-                end
-                return
-            end
-
-            if distance <= DIVE_DISTANCE then
-                autoDive(bp)
-            end
-        end)
-    end
-})
 
 local StaminaTab = Window:Tab({
     Title = "Infinite Stamina",
@@ -1225,13 +1113,32 @@ AdvancedGKSection:Toggle({
         end
         getgenv().AutoGKMode = "V2"
 
-        local DIVE_COOLDOWN = 0.8
-        local MAX_LOOKAHEAD = 2.2
-        local STEP = 0.05
+        -- Параметры для 4v4 и 7v7 режимов
+        local modes = {
+            ["4v4"] = {
+                DIVE_COOLDOWN = 0.6,
+                MAX_LOOKAHEAD = 2.3,
+                CLOSE_DISTANCE = 12,
+                FAR_DISTANCE = 28
+            },
+            ["7v7"] = {
+                DIVE_COOLDOWN = 0.5,
+                MAX_LOOKAHEAD = 2.5,
+                CLOSE_DISTANCE = 15,
+                FAR_DISTANCE = 35
+            }
+        }
+        
+        local mode = modes[PlayerGameMode] or modes["7v7"]
+        local DIVE_COOLDOWN = mode.DIVE_COOLDOWN
+        local MAX_LOOKAHEAD = mode.MAX_LOOKAHEAD
+        local CLOSE_DISTANCE = mode.CLOSE_DISTANCE
+        local FAR_DISTANCE = mode.FAR_DISTANCE
+        local STEP = 0.04
         local lastDive = 0
         local leftBtn, rightBtn = nil, nil
 
-        -- reuse button finder from Auto Dive if available
+        -- reuse button finder
         local function findButtonsLocal()
             if type(safeFindDiveButtons) == 'function' then
                 return safeFindDiveButtons()
@@ -1266,35 +1173,50 @@ AdvancedGKSection:Toggle({
         local lastAutoGKV2Check = 0
         getgenv().AutoGKV2Connection = RunService.Heartbeat:Connect(function()
             local now = tick()
-            if now - lastAutoGKV2Check < 0.07 then return end -- throttle checks to ~14Hz
+            if now - lastAutoGKV2Check < 0.05 then return end -- throttle checks to ~20Hz (faster for 7v7)
             lastAutoGKV2Check = now
 
             local ball, bp, bv = GetBallData()
             if not ball or not bp then return end
 
             local landing = predictLanding(bp, bv) or bp
-
-            -- check if predicted landing is inside goal bounds; if so, allow larger reaction distance
-            local heading, landingPos = isBallHeadingToGoal(ball, bv, 2.5)
+            local heading, landingPos = isBallHeadingToGoal(ball, bv, 2.8)
             local char = LocalPlayer.Character
             local root = char and char:FindFirstChild("HumanoidRootPart")
             if not root then return end
 
-            local allowedDist = heading and 26 or 18
             local dist = (root.Position - (landingPos or landing)).Magnitude
-            if dist > allowedDist then return end
-
-            local now2 = tick()
-            if now2 - lastDive < DIVE_COOLDOWN then return end
-
-            local localPos = root.CFrame:PointToObjectSpace(landingPos or landing)
-            if localPos.X < 0 then
-                tryClickLocal(leftBtn)
+            
+            -- 7v7 режим: более агрессивная реакция на все удары
+            if heading then
+                -- Если мяч идет в ворота - реагируем даже издалека
+                if dist <= FAR_DISTANCE then
+                    local now2 = tick()
+                    if now2 - lastDive < DIVE_COOLDOWN then return end
+                    
+                    local localPos = root.CFrame:PointToObjectSpace(landingPos or landing)
+                    if localPos.X < 0 then
+                        tryClickLocal(leftBtn)
+                    else
+                        tryClickLocal(rightBtn)
+                    end
+                    lastDive = now2
+                end
             else
-                tryClickLocal(rightBtn)
+                -- Даже если не идет в ворота - реагируем на близкие удары
+                if dist <= CLOSE_DISTANCE then
+                    local now2 = tick()
+                    if now2 - lastDive < DIVE_COOLDOWN then return end
+                    
+                    local localPos = root.CFrame:PointToObjectSpace(landing)
+                    if localPos.X < 0 then
+                        tryClickLocal(leftBtn)
+                    else
+                        tryClickLocal(rightBtn)
+                    end
+                    lastDive = now2
+                end
             end
-
-            lastDive = now2
         end)
     end
 })
