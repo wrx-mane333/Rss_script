@@ -619,37 +619,8 @@ local function doDive(keyStr)
     -- If mobile buttons were not found, there's nothing to do on this device.
 end
 
-local function safeLoadWindUI()
-    print("[VETA] Attempting to load WindUI...")
-    local ok, lib = pcall(function()
-        return loadstring(game:HttpGet("https://raw.githubusercontent.com/Footagesus/WindUI/main/dist/main.lua"))()
-    end)
-
-    if ok and type(lib) == "table" then
-        print("[VETA] WindUI loaded successfully")
-        return lib
-    end
-
-    warn("[VETA] WindUI failed to load. Error: " .. tostring(lib))
-    
-    -- Fallback: Notify user via standard Roblox UI if possible
-    pcall(function()
-        game:GetService("StarterGui"):SetCore("SendNotification", {
-            Title = "Script Error";
-            Text = "Failed to load WindUI library. Check console (F9).";
-            Duration = 5;
-        })
-    end)
-
-    return nil
-end
-
-local WindUI = safeLoadWindUI()
-
-if not WindUI or not WindUI.CreateWindow then
-    warn("[VETA] WindUI failed to load - UI will not appear")
-    return
-end
+local WindUI = loadstring(game:HttpGet("https://raw.githubusercontent.com/Footagesus/WindUI/main/dist/main.lua"))()
+if not WindUI then return end
 
 -- Helpers for Optimization
 local OptimizationsApplied = false
