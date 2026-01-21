@@ -635,9 +635,14 @@ local function doDive(keyStr)
     -- If mobile buttons were not found, there's nothing to do on this device.
 end
 
-local WindUI = loadstring(game:HttpGet("https://raw.githubusercontent.com/Footagesus/WindUI/main/dist/main.lua"))()
+local WindUI
+pcall(function()
+    WindUI = loadstring(game:HttpGet("https://raw.githubusercontent.com/Footagesus/WindUI/main/dist/main.lua"))()
+end)
+
 if not WindUI then 
     warn("WindUI Failed to Load")
+    print("[RSS] ОШИБКА: WindUI не загружен")
     return 
 end
 
@@ -855,12 +860,22 @@ local function FindDefendedGoal()
 end
 
 -- UI Construction
-local Window = WindUI:CreateWindow({
-    Title = "RSS - VETA",
-    Icon = "rbxassetid://106211849494703",
-    Author = "Made By VETA",
-    Folder = "RSSVETA",
-})
+print("[RSS] Начало создания UI...Создание главного окна")
+local Window = pcall(function()
+    return WindUI:CreateWindow({
+        Title = "RSS - VETA",
+        Icon = "rbxassetid://106211849494703",
+        Author = "Made By VETA",
+        Folder = "RSSVETA",
+    })
+end)
+
+if not Window then
+    print("[RSS] ОШИБКА: Не удалось создать главное окно!")
+    return
+end
+
+print("[RSS] Главное окно успешно создано!")
 pcall(function() Window:SetToggleKey(Enum.KeyCode.RightControl) end)
 
 -- [TAB 1] Reach
@@ -1898,9 +1913,19 @@ if UserInputService.TouchEnabled then
     end)
 end
 
-WindUI:Notify({
-    Title = "RSS Loaded",
-    Icon = "check",
-    Content = "RSS VETA Loaded Successfully"
-})
-print("RSS VETA Script Execution Completed")
+print("[RSS] Попытка показать финальное уведомление...")
+pcall(function()
+    if WindUI and type(WindUI.Notify) == 'function' then
+        WindUI:Notify({
+            Title = "RSS Loaded",
+            Icon = "check",
+            Content = "RSS VETA Loaded Successfully"
+        })
+        print("[RSS] Уведомление показано успешно!")
+    else
+        print("[RSS] ОШИБКА: WindUI или Notify недоступны")
+    end
+end)
+
+print("[RSS] Script execution completed!")
+print("[RSS] Скрипт полностью загружен. Нажмите RightControl для открытия/закрытия UI")
