@@ -861,8 +861,9 @@ end
 
 -- UI Construction
 print("[RSS] Начало создания UI...Создание главного окна")
-local Window = pcall(function()
-    return WindUI:CreateWindow({
+local Window
+pcall(function()
+    Window = WindUI:CreateWindow({
         Title = "RSS - VETA",
         Icon = "rbxassetid://106211849494703",
         Author = "Made By VETA",
