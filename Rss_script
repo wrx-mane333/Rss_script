@@ -65,7 +65,7 @@ local Config = {
 local ConfigFileName = "RSS_VETA_Config.json"
 
 local function SaveConfig()
-    if writefile then
+    if type(writefile) == 'function' then
         pcall(function()
             writefile(ConfigFileName, HttpService:JSONEncode(Config))
         end)
@@ -84,13 +84,15 @@ local function deepMerge(t1, t2)
 end
 
 local function LoadConfig()
-    if isfile and isfile(ConfigFileName) then
+    if type(isfile) == 'function' and isfile(ConfigFileName) then
         pcall(function()
-            local content = readfile(ConfigFileName)
-            local decoded = HttpService:JSONDecode(content)
-            
-            if decoded then
-                Config = deepMerge(Config, decoded)
+            if type(readfile) == 'function' then
+                local content = readfile(ConfigFileName)
+                local decoded = HttpService:JSONDecode(content)
+                
+                if decoded then
+                    Config = deepMerge(Config, decoded)
+                end
             end
         end)
         return true
@@ -380,9 +382,11 @@ local function ReachLoop()
                 local p = char:FindFirstChild(name)
                 if p and p:IsA("BasePart") then
                     pcall(function()
-                        firetouchinterest(p, ball, 0)
-                        task.wait()
-                        firetouchinterest(p, ball, 1)
+                        if type(firetouchinterest) == 'function' then
+                            firetouchinterest(p, ball, 0)
+                            task.wait()
+                            firetouchinterest(p, ball, 1)
+                        end
                     end)
                 end
             end
@@ -486,7 +490,7 @@ local function tryClick(btn)
 
     -- Method 2: Fire events directly (Exploit standard)
     pcall(function()
-        if getconnections then
+        if type(getconnections) == 'function' then
             for _, sig in ipairs({btn.MouseButton1Click, btn.MouseButton1Down, btn.Activated}) do
                  local ok, conns = pcall(getconnections, sig)
                  if ok and conns then
