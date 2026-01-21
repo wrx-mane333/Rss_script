@@ -384,12 +384,13 @@ local function ReachLoop()
         local now = tick()
         if not _LastTouchTime or now - _LastTouchTime > 0.03 then -- Limit to ~30Hz (fast enough for any ball)
             _LastTouchTime = now
-            local partsToTouch = {"LeftHand","RightHand","LeftFoot","RightFoot","HumanoidRootPart"}
+            local partsToTouch = {"LeftHand","RightHand","LeftFoot","RightFoot","HumanoidRootPart","Torso","UpperTorso","LowerTorso","Head"}
             for _, name in ipairs(partsToTouch) do
                 local p = char:FindFirstChild(name)
                 if p and p:IsA("BasePart") then
                     pcall(function()
                         firetouchinterest(p, ball, 0)
+                        task.wait()
                         firetouchinterest(p, ball, 1)
                     end)
                 end
