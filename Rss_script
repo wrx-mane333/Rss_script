@@ -232,7 +232,7 @@ end
 
 -- Returns active ball part, position, velocity (linear) and rotVelocity (angular)
 local function GetBallData()
-    local b = FindBall()
+    local b = FindBallCS()
     if not b then return nil end
     local pos = nil
     local vel = Vector3.new()
