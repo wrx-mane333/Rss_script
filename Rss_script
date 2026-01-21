@@ -153,30 +153,23 @@ local function CreateOrUpdateHitbox()
     if core then core.Transparency = shouldShow and 0.3 or 1 end
 end
 
-local function FindBallCS()
-    local tagged = GetTagged("GameBall")
-    if tagged and #tagged > 0 then
-        local ball = tagged[1]
-        if ball and ball:IsA("BasePart") and ball.Parent then
-            return ball
-        end
-    end
-
-    -- Fallback to old finder and tag the ball for next time
-    local ball = FindBallCS()
-    if ball then
-        AddTag(ball, "GameBall")
-    end
-    return ball
-end
-
 local function GetRoot() 
     return LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
 end
 
 local function FindBall()
+    -- 1. Optimization: Check CollectionService Tag first (Fastest)
+    local tagged = GetTagged("GameBall")
+    if tagged and #tagged > 0 then
+        local b = tagged[1]
+        if b and b:IsA("BasePart") and b.Parent then
+            _CachedBall = b
+            return b
+        end
+    end
+
     local now = tick()
-    if _CachedBall and _CachedBall.Parent and now - _LastBallSearch < 0.1 then -- Faster cache (0.1s)
+    if _CachedBall and _CachedBall.Parent and now - _LastBallSearch < 0.1 then 
         return _CachedBall
     end
     _LastBallSearch = now
@@ -201,6 +194,7 @@ local function FindBall()
             local part = firstPartFromModel(found)
             if part then 
                 _CachedBall = part
+                AddTag(part, "GameBall") -- Tag it for next time
                 return part 
             end
         end
@@ -217,14 +211,11 @@ local function FindBall()
                     local part = firstPartFromModel(found)
                     if part then
                         _CachedBall = part
+                        AddTag(part, "GameBall") -- Tag it
                         return part
                     end
                  end
             end
-            
-            -- Only as a last resort scan workspace descendants (very expensive)
-            -- local found = Workspace:FindFirstChild(name, true) 
-            -- Disabled full recursive search to prevent lag spikes
         end
     end
 
@@ -233,7 +224,7 @@ end
 
 -- Returns active ball part, position, velocity (linear) and rotVelocity (angular)
 local function GetBallData()
-    local b = FindBallCS()
+    local b = FindBall()
     if not b then return nil end
     local pos = nil
     local vel = Vector3.new()
