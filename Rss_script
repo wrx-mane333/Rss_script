@@ -384,6 +384,233 @@ TeamSection:Button({
 
 GkTab:Space()
 
+-- ============ ПРОДВИНУТАЯ СИСТЕМА ДАЙВОВ (ОТДЕЛЬНАЯ) ============
+
+-- Параметры для продвинутой системы
+local AdvancedDiveState = {
+    Enabled = false,
+    Connection = nil,
+    LastDiveTime = 0,
+}
+
+local ADVANCED_DIVE_CONFIG = {
+    GOAL_DISTANCE_4V4 = 25,
+    GOAL_DISTANCE_7V7 = 40,
+    BALL_HEADING_THRESHOLD = 0.3,
+    MIN_BALL_VELOCITY = 15,
+    DIVE_COOLDOWN = 0.5,
+}
+
+-- Информация о пинге
+local function GetPlayerPing()
+    local ping = game:GetService("Stats").Network.ServerStatsItem["Data Ping"]:GetValue()
+    return math.floor(ping)
+end
+
+-- Проверка: мяч движется в сторону ворот?
+local function IsBallHeadingToGoal()
+    local ball = FindBall()
+    if not ball then return false end
+    
+    local root = GetRoot()
+    if not root then return false end
+    
+    local ballVel = ball.AssemblyLinearVelocity or ball.Velocity or Vector3.zero
+    if ballVel.Magnitude < ADVANCED_DIVE_CONFIG.MIN_BALL_VELOCITY then
+        return false
+    end
+    
+    -- Направление от ворот к мячу
+    local directionToGoal = (root.Position - ball.Position).Unit
+    local ballDirection = ballVel.Unit
+    
+    -- Проверяем, движется ли мяч в сторону ворот
+    return directionToGoal:Dot(ballDirection) > ADVANCED_DIVE_CONFIG.BALL_HEADING_THRESHOLD
+end
+
+-- Проверка: нужно ли делать дайв?
+local function ShouldDiveAdvanced()
+    if not IsBallHeadingToGoal() then return false end
+    
+    local ball = FindBall()
+    if not ball then return false end
+    
+    local root = GetRoot()
+    if not root then return false end
+    
+    local ballPos = ball.Position
+    local playerPos = root.Position
+    local distance = (ballPos - playerPos).Magnitude
+    
+    -- Проверяем расстояние до цели
+    local gameMode = game.PlaceId -- Можно добавить логику определения режима
+    local maxDistance = ADVANCED_DIVE_CONFIG.GOAL_DISTANCE_4V4
+    
+    return distance <= maxDistance
+end
+
+-- Проверка: находитесь ли вы близко к воротам?
+local function IsPlayerNearGoal()
+    local root = GetRoot()
+    if not root then return false end
+    
+    local playerPos = root.Position
+    -- Предположим, ворота находятся примерно в позиции X=0
+    local distanceToGoal = math.abs(playerPos.X)
+    
+    return distanceToGoal <= ADVANCED_DIVE_CONFIG.GOAL_DISTANCE_4V4
+end
+
+-- Определить высоту мяча и выбрать дайв
+local function CalculateDiveDirectionAdvanced()
+    local ball = FindBall()
+    if not ball then return nil end
+    
+    local root = GetRoot()
+    if not root then return nil end
+    
+    local ballPos = ball.Position
+    local ballVel = ball.AssemblyLinearVelocity or ball.Velocity or Vector3.zero
+    local playerPos = root.Position
+    
+    -- Предсказываем позицию мяча через несколько фреймов
+    local predictedPos = ballPos + (ballVel * 0.1)
+    local localBallPos = root.CFrame:PointToObjectSpace(predictedPos)
+    
+    -- Анализируем высоту мяча
+    local ballHeight = localBallPos.Y
+    local ballXOffset = localBallPos.X
+    
+    -- ВЫБОР ТИПА ДАЙВА
+    local diveKeys = {}
+    
+    if ballHeight > 3 then
+        -- Высокий мяч - добавляем Space (высокий прыжок)
+        table.insert(diveKeys, "Space")
+    elseif ballHeight < -1 then
+        -- Низкий мяч - добавляем X (низкий подкат)
+        table.insert(diveKeys, "X")
+    end
+    
+    -- Боковое направление
+    if math.abs(ballXOffset) > 2 then
+        if ballXOffset < 0 then
+            table.insert(diveKeys, "Q") -- Влево
+        else
+            table.insert(diveKeys, "E") -- Вправо
+        end
+    end
+    
+    -- Если нет специальных клавиш, используем Space
+    if #diveKeys == 0 then
+        table.insert(diveKeys, "Space")
+    end
+    
+    return diveKeys
+end
+
+-- Выполнить дайв с клавишами
+local function DoDiveAdvanced(diveKeys)
+    if not diveKeys or #diveKeys == 0 then return end
+    
+    local VirtualInputManager = game:GetService("VirtualInputManager")
+    
+    for _, key in ipairs(diveKeys) do
+        pcall(function()
+            VirtualInputManager:SendKeyEvent(true, Enum.KeyCode[key], false, game)
+        end)
+    end
+    
+    task.wait(0.05)
+    
+    for _, key in ipairs(diveKeys) do
+        pcall(function()
+            VirtualInputManager:SendKeyEvent(false, Enum.KeyCode[key], false, game)
+        end)
+    end
+end
+
+local AdvancedDiveSection = GkTab:Section({
+    Title = "🚀 Продвинутая система дайвов"
+})
+
+AdvancedDiveSection:Toggle({
+    Title = "Включить Advanced Auto Dive",
+    Default = false,
+    Callback = function(enabled)
+        AdvancedDiveState.Enabled = enabled
+        
+        if not enabled then
+            if AdvancedDiveState.Connection then
+                AdvancedDiveState.Connection:Disconnect()
+                AdvancedDiveState.Connection = nil
+            end
+            Notify("Advanced Dive", "Выключен ✗", "ban")
+            return
+        end
+        
+        local ping = GetPlayerPing()
+        if ping > 130 then
+            Notify("Внимание!", "Пинг " .. ping .. " может влиять на дайвы!", "ban")
+        end
+        
+        AdvancedDiveState.Connection = RunService.Heartbeat:Connect(function()
+            if not AdvancedDiveState.Enabled then return end
+            
+            local currentTime = tick()
+            if (currentTime - AdvancedDiveState.LastDiveTime) < ADVANCED_DIVE_CONFIG.DIVE_COOLDOWN then
+                return
+            end
+            
+            if ShouldDiveAdvanced() then
+                local diveKeys = CalculateDiveDirectionAdvanced()
+                if diveKeys then
+                    DoDiveAdvanced(diveKeys)
+                    AdvancedDiveState.LastDiveTime = currentTime
+                    
+                    local keyStr = table.concat(diveKeys, " + ")
+                    print("🎯 ADVANCED DIVE: " .. keyStr .. " | Пинг: " .. GetPlayerPing())
+                end
+            end
+        end)
+        
+        Notify("Advanced Dive", "Активирован! Пинг: " .. ping .. "ms", "check")
+    end
+})
+
+AdvancedDiveSection:Button({
+    Title = "📊 Показать статус пинга",
+    Callback = function()
+        local ping = GetPlayerPing()
+        local status = ping <= 130 and "✓ ОТЛИЧНО" or "⚠ ВЫСОКИЙ"
+        Notify("Пинг", ping .. "ms (" .. status .. ")", ping <= 130 and "check" or "ban")
+    end
+})
+
+AdvancedDiveSection:Button({
+    Title = "🎯 Проверить позицию у ворот",
+    Callback = function()
+        local isNear = IsPlayerNearGoal()
+        Notify("Позиция", isNear and "Вы у ворот! ✓" or "Вы не у ворот ✗", isNear and "check" or "ban")
+    end
+})
+
+AdvancedDiveSection:Button({
+    Title = "⚡ Тест дайва",
+    Callback = function()
+        local diveKeys = CalculateDiveDirectionAdvanced()
+        if diveKeys then
+            local keyStr = table.concat(diveKeys, " + ")
+            DoDiveAdvanced(diveKeys)
+            Notify("Тест", "Дайв: " .. keyStr, "check")
+        else
+            Notify("Тест", "Не могу определить дайв", "ban")
+        end
+    end
+})
+
+GkTab:Space()
+
 -- ============ УЛУЧШЕННАЯ AUTO DIVE СИСТЕМА С УМНОЙ ЛОГИКОЙ ============
 
 local DiveState = {
