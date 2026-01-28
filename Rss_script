@@ -20,9 +20,10 @@ _G.BringMobs = true -- Собирать мобов в кучу
 _G.StatToUpgrade = "Melee"
 _G.AttackDist = 3
 _G.MobileAttackOnly = true
-_G.HitboxSize = 20 -- Безопасный размер (не больше 30!)
-_G.FarmHeight = 15 -- Высота над мобами (не больше 20 студов!)
-_G.BringMobsOffset = 2 -- Небольшой разброс мобов (чтобы не стояли в одной точке)
+_G.HitboxSize = 25 -- Безопасный размер (не больше 30!)
+_G.FarmHeight = 12 -- Высота над мобами (не больше 20 студов!)
+_G.BringMobsRadius = 8 -- Радиус круга для мобов (они будут вокруг тебя)
+_G.RotatePlayer = true -- Вращать игрока для удара по всем мобам
 
 -- Система отслеживания фруктов
 local FruitSpawnData = {
@@ -406,7 +407,7 @@ task.spawn(function()
     end
 end)
 
--- Bring Mobs (УЛУЧШЕННЫЙ - с офсетом и проверкой дистанции)
+-- Bring Mobs (УЛУЧШЕННЫЙ v2 - мобы по кругу вокруг игрока БЕЗ заморозки)
 local MobBringIndex = 0
 local function BringMobs(targetPos)
     if not _G.BringMobs then return end
@@ -418,44 +419,46 @@ local function BringMobs(targetPos)
         local targetName = GetQuestTarget()
         local mobCount = 0
         
+        -- Собираем всех нужных мобов
+        local mobsToMove = {}
         for _, v in pairs(enemies:GetChildren()) do
             if v:FindFirstChild("Humanoid") and v:FindFirstChild("HumanoidRootPart") and v.Humanoid.Health > 0 then
                 if not targetName or string.find(v.Name, targetName) then
-                    local mobRoot = v.HumanoidRootPart
-                    
-                    -- Проверка: не слишком ли далеко от спавна (защита от Leash)
-                    -- Если моб дальше 200 студов от целевой позиции, не трогаем его
-                    local distanceFromTarget = (mobRoot.Position - targetPos.Position).Magnitude
-                    if distanceFromTarget > 200 then
-                        continue
-                    end
-                    
-                    -- Добавляем небольшой офсет для каждого моба (чтобы не стояли в одной точке)
-                    local offsetX = math.random(-_G.BringMobsOffset, _G.BringMobsOffset)
-                    local offsetZ = math.random(-_G.BringMobsOffset, _G.BringMobsOffset)
-                    local bringPos = targetPos * CFrame.new(offsetX, 0, offsetZ)
-                    
-                    -- Телепортируем моба
-                    mobRoot.CFrame = bringPos
-                    mobRoot.Velocity = Vector3.zero
-                    mobRoot.CanCollide = false -- КРИТИЧНО: отключаем коллизии
-                    
-                    -- Замораживаем моба
-                    if v.Humanoid then
-                        v.Humanoid.WalkSpeed = 0
-                        v.Humanoid.JumpPower = 0
-                    end
-                    
-                    -- Отключаем CanCollide у ВСЕХ частей моба
-                    for _, part in pairs(v:GetDescendants()) do
-                        if part:IsA("BasePart") then
-                            part.CanCollide = false
-                        end
-                    end
-                    
-                    mobCount = mobCount + 1
+                    table.insert(mobsToMove, v)
                 end
             end
+        end
+        
+        -- Расставляем мобов по кругу
+        for i, v in pairs(mobsToMove) do
+            local mobRoot = v.HumanoidRootPart
+            
+            -- Проверка: не слишком ли далеко от спавна (защита от Leash)
+            local distanceFromTarget = (mobRoot.Position - targetPos.Position).Magnitude
+            if distanceFromTarget > 200 then
+                continue
+            end
+            
+            -- Расчет позиции по кругу
+            local angle = (2 * math.pi / math.max(#mobsToMove, 1)) * (i - 1)
+            local offsetX = math.cos(angle) * _G.BringMobsRadius
+            local offsetZ = math.sin(angle) * _G.BringMobsRadius
+            
+            -- Позиция моба - вокруг целевой точки
+            local bringPos = targetPos * CFrame.new(offsetX, 0, offsetZ)
+            
+            -- Телепортируем моба (БЕЗ заморозки - пусть двигаются)
+            mobRoot.CFrame = bringPos
+            mobRoot.CanCollide = false -- Только отключаем коллизии
+            
+            -- Отключаем CanCollide у ВСЕХ частей моба (чтобы не выталкивали друг друга)
+            for _, part in pairs(v:GetDescendants()) do
+                if part:IsA("BasePart") then
+                    part.CanCollide = false
+                end
+            end
+            
+            mobCount = mobCount + 1
         end
         
         -- Обновляем инфо-панель
@@ -504,10 +507,22 @@ task.spawn(function()
                     -- НОВАЯ БЕЗОПАСНАЯ ПОЗИЦИЯ: ВЫСОКО НАД МОБОМ
                     local safePos = target.HumanoidRootPart.Position + Vector3.new(0, _G.FarmHeight, 0)
                     
-                    Player.Character.HumanoidRootPart.CFrame = CFrame.new(safePos, target.HumanoidRootPart.Position)
+                    -- Вращение игрока для удара по всем мобам
+                    if _G.RotatePlayer then
+                        local rotationAngle = tick() * 3 -- Скорость вращения
+                        local lookAtPos = target.HumanoidRootPart.Position + Vector3.new(
+                            math.cos(rotationAngle) * 5,
+                            0,
+                            math.sin(rotationAngle) * 5
+                        )
+                        Player.Character.HumanoidRootPart.CFrame = CFrame.new(safePos, lookAtPos)
+                    else
+                        Player.Character.HumanoidRootPart.CFrame = CFrame.new(safePos, target.HumanoidRootPart.Position)
+                    end
+                    
                     Player.Character.HumanoidRootPart.Velocity = Vector3.zero
                     
-                    -- Собираем всех мобов к себе
+                    -- Собираем всех мобов к себе (по кругу)
                     BringMobs(CFrame.new(target.HumanoidRootPart.Position))
                     
                     if weapon then 
