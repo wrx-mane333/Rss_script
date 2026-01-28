@@ -121,11 +121,6 @@ ScrollFrame.ZIndex = 102
 ScrollFrame.CanvasSize = UDim2.new(0, 0, 0, 0) -- Будет обновляться автоматически
 ScrollFrame.ScrollBarImageColor3 = Color3.fromRGB(255, 85, 0)
 
--- Логика переключения меню
-ToggleBtn.Activated:Connect(function()
-    MainFrame.Visible = not MainFrame.Visible
-end)
-
 local ButtonCount = 0
 
 local function CreateSwitch(text, defaultVal, callback)
@@ -156,6 +151,11 @@ local function CreateSwitch(text, defaultVal, callback)
     -- Обновляем размер Canvas для прокрутки
     ScrollFrame.CanvasSize = UDim2.new(0, 0, 0, ButtonCount * 45 + 10)
 end
+
+-- Логика переключения меню
+ToggleBtn.Activated:Connect(function()
+    MainFrame.Visible = not MainFrame.Visible
+end)
 
 -- Добавляем кнопки
 CreateSwitch("Auto Farm", _G.AutoFarm, function(val) _G.AutoFarm = val end)
