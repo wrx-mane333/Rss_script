@@ -1,4 +1,4 @@
-local Players = game:GetService("Players")+
+local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
@@ -13,57 +13,38 @@ _G.AutoFarm = false
 _G.AutoQuest = false
 _G.FruitESP = false
 _G.AutoCollectFruit = false
-_G.ReachAura = true
-_G.AutoStats = false
-_G.FastAttack = true -- Быстрая атака
-_G.BringMobs = true -- Собирать мобов в кучу
-_G.StatToUpgrade = "Melee"
+_G.ReachAura = true -- Включено по умолчанию для удобства
+_G.AutoStats = false -- Авто-статы
 _G.AttackDist = 3
 _G.MobileAttackOnly = true
-_G.HitboxSize = 25 -- Безопасный размер (не больше 30!)
-_G.FarmHeight = 5 -- НИЗКАЯ высота - чтобы урон проходил!
-_G.BringMobsRadius = 8 -- Радиус круга для мобов (они будут вокруг тебя)
-_G.RotatePlayer = false -- НЕ вращать - стоим на месте
-_G.ServerHop = false -- Автопоиск фруктов на других серверах
-_G.ServerHopDelay = 300 -- Проверка каждые 5 минут (300 сек)
 
 -- Система отслеживания фруктов
 local FruitSpawnData = {
     LastSeenFruits = {},
     SpawnTimes = {},
     AverageSpawnTime = 3600,
-    LastDespawnTime = 0,
-    KnownSpawnPoints = {} -- Запоминаем позиции серверных фруктов
+    LastDespawnTime = 0
 }
-
--- Список известных спавн-поинтов фруктов (First Sea)
-local FruitSpawnLocations = {
-    Vector3.new(-2900, 15, 251), -- Jungle
-    Vector3.new(-1750, 15, 1650), -- Pirate Village
-    Vector3.new(945, 70, 4353), -- Desert
-    Vector3.new(-5420, 15, -2823), -- Frozen Village
-    Vector3.new(-4505, 735, -2622), -- Sky Island
-    Vector3.new(4875, 740, 733), -- Upper Sky
-    Vector3.new(5543, 410, -79), -- Fountain City
-    Vector3.new(61163, 11, 1819), -- Marine Fortress
-}
-
-local LastStatUpgrade = 0
-local AttackCooldown = 0
 
 -- // GUI ИНТЕРФЕЙС //
+-- Удаляем старое GUI если есть
+local oldGui = Player:WaitForChild("PlayerGui"):FindFirstChild("BloxFruitMobileGUI_v3")
+if oldGui then oldGui:Destroy() end
+
 local ScreenGui = Instance.new("ScreenGui")
-ScreenGui.Name = "BloxFruitMobileGUI_v5"
+ScreenGui.Name = "BloxFruitMobileGUI_v3"
 ScreenGui.Parent = Player:WaitForChild("PlayerGui")
 ScreenGui.ResetOnSpawn = false
 ScreenGui.DisplayOrder = 1000
+ScreenGui.IgnoreGuiInset = true -- Важно для мобилок!
 
--- Кнопка МЕНЮ
+-- Кнопка МЕНЮ (сделаем её перетаскиваемой)
 local ToggleBtn = Instance.new("TextButton")
 ToggleBtn.Name = "ToggleBtn"
 ToggleBtn.Parent = ScreenGui
 ToggleBtn.BackgroundColor3 = Color3.fromRGB(0, 120, 255)
-ToggleBtn.Position = UDim2.new(0.05, 0, 0.15, 0)
+-- Позиция чуть ниже (чтобы не перекрывалась чатом)
+ToggleBtn.Position = UDim2.new(0, 50, 0.3, 0) 
 ToggleBtn.Size = UDim2.new(0, 60, 0, 60)
 ToggleBtn.Font = Enum.Font.SourceSansBold
 ToggleBtn.Text = "MENU"
@@ -73,6 +54,7 @@ ToggleBtn.ZIndex = 100
 ToggleBtn.BorderSizePixel = 2
 ToggleBtn.BorderColor3 = Color3.fromRGB(255, 255, 255)
 ToggleBtn.Active = true
+ToggleBtn.Draggable = true -- Теперь можно двигать!
 
 local UICornerBtn = Instance.new("UICorner")
 UICornerBtn.CornerRadius = UDim.new(0.5, 0)
@@ -85,7 +67,7 @@ MainFrame.Parent = ScreenGui
 MainFrame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
 MainFrame.Position = UDim2.new(0.5, 0, 0.5, 0)
 MainFrame.AnchorPoint = Vector2.new(0.5, 0.5)
-MainFrame.Size = UDim2.new(0.55, 0, 0.7, 0)
+MainFrame.Size = UDim2.new(0.5, 0, 0.65, 0)
 MainFrame.Visible = false
 MainFrame.ZIndex = 101
 MainFrame.BorderSizePixel = 0
@@ -97,8 +79,8 @@ UICornerFrame.Parent = MainFrame
 -- Заголовок
 local Title = Instance.new("TextLabel")
 Title.Parent = MainFrame
-Title.Text = "BLOX FRUITS SCRIPT v5"
-Title.Size = UDim2.new(1, 0, 0.1, 0)
+Title.Text = "BLOX FRUITS SCRIPT v3"
+Title.Size = UDim2.new(1, 0, 0.12, 0)
 Title.BackgroundColor3 = Color3.fromRGB(255, 85, 0)
 Title.TextColor3 = Color3.fromRGB(255, 255, 255)
 Title.Font = Enum.Font.SourceSansBold
@@ -109,30 +91,25 @@ local UICornerTitle = Instance.new("UICorner")
 UICornerTitle.CornerRadius = UDim.new(0.1, 0)
 UICornerTitle.Parent = Title
 
--- SCROLLING FRAME (для прокрутки кнопок)
-local ScrollFrame = Instance.new("ScrollingFrame")
-ScrollFrame.Name = "ScrollFrame"
-ScrollFrame.Parent = MainFrame
-ScrollFrame.Position = UDim2.new(0.05, 0, 0.12, 0)
-ScrollFrame.Size = UDim2.new(0.9, 0, 0.65, 0)
-ScrollFrame.BackgroundTransparency = 1
-ScrollFrame.ScrollBarThickness = 6
-ScrollFrame.ZIndex = 102
-ScrollFrame.CanvasSize = UDim2.new(0, 0, 0, 0) -- Будет обновляться автоматически
-ScrollFrame.ScrollBarImageColor3 = Color3.fromRGB(255, 85, 0)
+-- Логика переключения меню
+ToggleBtn.Activated:Connect(function()
+    MainFrame.Visible = not MainFrame.Visible
+end)
 
+-- Счетчик кнопок для правильного позиционирования
 local ButtonCount = 0
 
+-- Функция создания кнопок (Toggle)
 local function CreateSwitch(text, defaultVal, callback)
     local btn = Instance.new("TextButton")
-    btn.Parent = ScrollFrame -- Теперь кнопки в ScrollFrame!
+    btn.Parent = MainFrame
     btn.BackgroundColor3 = defaultVal and Color3.fromRGB(0, 200, 0) or Color3.fromRGB(200, 0, 0)
-    btn.Size = UDim2.new(1, -10, 0, 40) -- Фиксированная высота
-    btn.Position = UDim2.new(0, 5, 0, ButtonCount * 45) -- Отступ между кнопками
+    btn.Size = UDim2.new(0.9, 0, 0.12, 0)
+    btn.Position = UDim2.new(0.05, 0, 0.15 + ButtonCount * 0.14, 0)
     btn.Text = text .. ": " .. (defaultVal and "ON" or "OFF")
     btn.TextColor3 = Color3.fromRGB(255, 255, 255)
     btn.Font = Enum.Font.SourceSansBold
-    btn.TextSize = 15
+    btn.TextSize = 16
     btn.ZIndex = 103
     
     local corner = Instance.new("UICorner")
@@ -147,47 +124,22 @@ local function CreateSwitch(text, defaultVal, callback)
     end)
     
     ButtonCount = ButtonCount + 1
-    
-    -- Обновляем размер Canvas для прокрутки
-    ScrollFrame.CanvasSize = UDim2.new(0, 0, 0, ButtonCount * 45 + 10)
 end
-
--- Логика переключения меню
-ToggleBtn.Activated:Connect(function()
-    MainFrame.Visible = not MainFrame.Visible
-end)
 
 -- Добавляем кнопки
 CreateSwitch("Auto Farm", _G.AutoFarm, function(val) _G.AutoFarm = val end)
 CreateSwitch("Auto Quest", _G.AutoQuest, function(val) _G.AutoQuest = val end)
-CreateSwitch("Fruit ESP (Server Only)", _G.FruitESP, function(val) _G.FruitESP = val end)
+CreateSwitch("Fruit ESP", _G.FruitESP, function(val) _G.FruitESP = val end)
 CreateSwitch("Auto Collect Fruit", _G.AutoCollectFruit, function(val) _G.AutoCollectFruit = val end)
 CreateSwitch("Auto Stats (Melee)", _G.AutoStats, function(val) _G.AutoStats = val end)
 CreateSwitch("Hitbox Reach", _G.ReachAura, function(val) _G.ReachAura = val end)
-CreateSwitch("Server Hop (Find Fruits)", _G.ServerHop, function(val) _G.ServerHop = val end)
-
--- Информационная панель
-local InfoLabel = Instance.new("TextLabel")
-InfoLabel.Parent = MainFrame
-InfoLabel.Size = UDim2.new(0.9, 0, 0.08, 0)
-InfoLabel.Position = UDim2.new(0.05, 0, 0.8, 0)
-InfoLabel.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
-InfoLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
-InfoLabel.Font = Enum.Font.SourceSans
-InfoLabel.TextSize = 12
-InfoLabel.Text = "⚡ Fast Attack & Bring Mobs включены"
-InfoLabel.ZIndex = 103
-
-local UICornerInfo = Instance.new("UICorner")
-UICornerInfo.CornerRadius = UDim.new(0.2, 0)
-UICornerInfo.Parent = InfoLabel
 
 -- Кнопка закрытия
 local CloseBtn = Instance.new("TextButton")
 CloseBtn.Parent = MainFrame
 CloseBtn.BackgroundColor3 = Color3.fromRGB(100, 100, 100)
-CloseBtn.Size = UDim2.new(0.4, 0, 0.08, 0)
-CloseBtn.Position = UDim2.new(0.3, 0, 0.9, 0)
+CloseBtn.Size = UDim2.new(0.4, 0, 0.1, 0)
+CloseBtn.Position = UDim2.new(0.3, 0, 0.88, 0)
 CloseBtn.Text = "HIDE MENU"
 CloseBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
 CloseBtn.Font = Enum.Font.SourceSansBold
@@ -205,7 +157,7 @@ end)
 local FruitTimerLabel = Instance.new("TextLabel")
 FruitTimerLabel.Parent = ScreenGui
 FruitTimerLabel.Position = UDim2.new(0.05, 0, 0.08, 0)
-FruitTimerLabel.Size = UDim2.new(0, 280, 0, 32)
+FruitTimerLabel.Size = UDim2.new(0, 240, 0, 30)
 FruitTimerLabel.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
 FruitTimerLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
 FruitTimerLabel.Font = Enum.Font.SourceSansBold
@@ -219,61 +171,7 @@ UICornerTimer.Parent = FruitTimerLabel
 
 -- // ЛОГИКА СКРИПТА //
 
--- Server Hop функция (ИСПРАВЛЕННАЯ - без HttpGet)
-local TeleportService = game:GetService("TeleportService")
-
-local LastServerHopCheck = 0
-
-local function ServerHop()
-    pcall(function()
-        print("🔍 Ищу другой сервер...")
-        
-        -- Простой метод - телепорт на случайный сервер
-        local PlaceId = game.PlaceId
-        
-        -- Используем TeleportService напрямую
-        TeleportService:Teleport(PlaceId, Player)
-    end)
-end
-
-local function CheckForFruitsAndHop()
-    if not _G.ServerHop then return end
-    
-    local currentTime = os.time()
-    if currentTime - LastServerHopCheck < _G.ServerHopDelay then
-        return
-    end
-    
-    LastServerHopCheck = currentTime
-    
-    pcall(function()
-        local fruits = FindAllFruits()
-        
-        if #fruits == 0 then
-            print("🍎 Фруктов нет на этом сервере. Меняю сервер через 5 сек...")
-            FruitTimerLabel.Text = "🌐 Меняю сервер (нет фруктов)..."
-            task.wait(5)
-            ServerHop()
-        else
-            print("✅ Фрукты найдены на этом сервере: " .. #fruits)
-        end
-    end)
-end
-
--- Автоматическая проверка серверов
-task.spawn(function()
-    task.wait(10) -- Ждем 10 сек после загрузки
-    
-    while task.wait(60) do -- Проверка каждую минуту
-        if _G.ServerHop then
-            CheckForFruitsAndHop()
-        end
-    end
-end)
-
--- // ЛОГИКА СКРИПТА //
-
--- Квесты
+-- // КОНФИГУРАЦИЯ КВЕСТОВ (FIRST SEA) //
 local QuestList = {
     {Req=0, Name="BanditQuest1", Id=1, Mob="Bandit"},
     {Req=10, Name="JungleQuest", Id=1, Mob="Monkey"},
@@ -326,6 +224,12 @@ local function GetQuestTarget()
             for _, cfg in pairs(QuestList) do
                 if string.find(t, cfg.Mob) then return cfg.Mob end
             end
+            if string.find(t, "Bandit") then return "Bandit" end
+            if string.find(t, "Monkey") then return "Monkey" end
+            if string.find(t, "Gorilla") then return "Gorilla" end
+            if string.find(t, "Gorilla King") then return "Gorilla King" end
+            if string.find(t, "Pirate") then return "Pirate" end
+            if string.find(t, "Galley Pirate") then return "Galley Pirate" end
         end
     end
     return nil
@@ -344,73 +248,39 @@ local function EquipBest()
     end
 end
 
--- Проверка - серверный фрукт или от игрока
-local function IsServerFruit(fruitPosition)
-    local minDistance = math.huge
-    
-    for _, spawnPoint in pairs(FruitSpawnLocations) do
-        local distance = (fruitPosition - spawnPoint).Magnitude
-        if distance < minDistance then
-            minDistance = distance
-        end
-    end
-    
-    -- Если фрукт в пределах 100 стадов от известного спавн-поинта = серверный
-    -- Иначе = игрок выбросил
-    if minDistance < 100 then
-        return true
-    end
-    
-    -- Дополнительная проверка: если фрукт только что появился и его не было раньше
-    -- То запоминаем это место как новый спавн-поинт
-    return false
-end
-
--- Функция поиска фруктов (ТОЛЬКО СЕРВЕРНЫЕ)
+-- Функция поиска фруктов в Workspace
 local function FindAllFruits()
     local fruits = {}
     for _, v in pairs(Workspace:GetChildren()) do
         if string.find(v.Name, "Fruit") and v:IsA("Tool") and v:FindFirstChild("Handle") then
-            -- Проверяем - серверный фрукт или нет
-            if IsServerFruit(v.Handle.Position) then
-                table.insert(fruits, v)
-                
-                -- Добавляем в список известных спавн-поинтов если новый
-                local isKnown = false
-                for _, known in pairs(FruitSpawnLocations) do
-                    if (v.Handle.Position - known).Magnitude < 50 then
-                        isKnown = true
-                        break
-                    end
-                end
-                
-                if not isKnown then
-                    table.insert(FruitSpawnLocations, v.Handle.Position)
-                    print("🆕 Найден новый спавн-поинт фрукта: " .. v.Name)
-                end
-            end
+            table.insert(fruits, v)
         end
     end
     return fruits
 end
 
--- Система отслеживания спавна
+-- Система отслеживания спавна фруктов
 local function UpdateFruitTracking()
     local currentFruits = FindAllFruits()
     local currentFruitNames = {}
     
+    -- Собираем текущие фрукты
     for _, fruit in pairs(currentFruits) do
         currentFruitNames[fruit.Name] = true
     end
     
+    -- Проверяем новые фрукты (заспавнились)
     for fruitName, _ in pairs(currentFruitNames) do
         if not FruitSpawnData.LastSeenFruits[fruitName] then
+            -- Новый фрукт заспавнился!
             local spawnTime = os.time()
             
+            -- Если был предыдущий деспавн, рассчитываем интервал
             if FruitSpawnData.LastDespawnTime > 0 then
                 local interval = spawnTime - FruitSpawnData.LastDespawnTime
                 table.insert(FruitSpawnData.SpawnTimes, interval)
                 
+                -- Рассчитываем средний интервал спавна (последние 5 спавнов)
                 if #FruitSpawnData.SpawnTimes > 5 then
                     table.remove(FruitSpawnData.SpawnTimes, 1)
                 end
@@ -426,8 +296,10 @@ local function UpdateFruitTracking()
         end
     end
     
+    -- Проверяем деспавн фруктов
     for fruitName, _ in pairs(FruitSpawnData.LastSeenFruits) do
         if not currentFruitNames[fruitName] then
+            -- Фрукт исчез (деспавн или подобран)
             FruitSpawnData.LastSeenFruits[fruitName] = nil
             FruitSpawnData.LastDespawnTime = os.time()
         end
@@ -436,104 +308,33 @@ local function UpdateFruitTracking()
     return currentFruits
 end
 
--- Автосбор фруктов (БЕСКОНЕЧНЫЙ РАДИУС)
+-- Автосбор фруктов
 task.spawn(function()
-    while task.wait(3) do
+    while task.wait(2) do
         if _G.AutoCollectFruit and Player.Character and Player.Character:FindFirstChild("HumanoidRootPart") then
             pcall(function()
                 local fruits = FindAllFruits()
+                local nearestFruit = nil
+                local nearestDist = math.huge
                 
-                if #fruits > 0 then
-                    -- Ищем ближайший фрукт (из серверных)
-                    local nearestFruit = nil
-                    local nearestDist = math.huge
-                    
-                    for _, fruit in pairs(fruits) do
-                        local dist = (Player.Character.HumanoidRootPart.Position - fruit.Handle.Position).Magnitude
-                        if dist < nearestDist then
-                            nearestDist = dist
-                            nearestFruit = fruit
-                        end
+                for _, fruit in pairs(fruits) do
+                    local dist = (Player.Character.HumanoidRootPart.Position - fruit.Handle.Position).Magnitude
+                    if dist < nearestDist then
+                        nearestDist = dist
+                        nearestFruit = fruit
                     end
-                    
-                    if nearestFruit then
-                        print("🍎 Телепорт к фрукту: " .. nearestFruit.Name .. " (" .. math.floor(nearestDist) .. "m)")
-                        
-                        -- Множественные попытки телепорта для надежности
-                        for i = 1, 3 do
-                            Player.Character.HumanoidRootPart.CFrame = nearestFruit.Handle.CFrame * CFrame.new(0, 5, 0)
-                            task.wait(0.2)
-                            Player.Character.HumanoidRootPart.CFrame = nearestFruit.Handle.CFrame
-                            task.wait(0.3)
-                            
-                            -- Проверяем - подобрали ли фрукт
-                            if not nearestFruit.Parent then
-                                print("✅ Фрукт подобран!")
-                                break
-                            end
-                        end
-                    end
+                end
+                
+                if nearestFruit and nearestDist < 2000 then
+                    Player.Character.HumanoidRootPart.CFrame = nearestFruit.Handle.CFrame
+                    task.wait(0.3)
                 end
             end)
         end
     end
 end)
 
--- Bring Mobs (ФИНАЛЬНАЯ ВЕРСИЯ - мобы в одной точке рядом с тобой)
-local MobBringIndex = 0
-local function BringMobs(targetPos)
-    if not _G.BringMobs then return end
-    
-    pcall(function()
-        local enemies = Workspace:FindFirstChild("Enemies")
-        if not enemies then return end
-        
-        local targetName = GetQuestTarget()
-        local mobCount = 0
-        
-        for _, v in pairs(enemies:GetChildren()) do
-            if v:FindFirstChild("Humanoid") and v:FindFirstChild("HumanoidRootPart") and v.Humanoid.Health > 0 then
-                if not targetName or string.find(v.Name, targetName) then
-                    local mobRoot = v.HumanoidRootPart
-                    
-                    -- Проверка: не слишком ли далеко от спавна (защита от Leash)
-                    local distanceFromTarget = (mobRoot.Position - targetPos.Position).Magnitude
-                    if distanceFromTarget > 200 then
-                        continue
-                    end
-                    
-                    -- Телепортируем моба В ОДНУ ТОЧКУ (прямо к тебе)
-                    mobRoot.CFrame = targetPos
-                    mobRoot.Velocity = Vector3.zero
-                    mobRoot.CanCollide = false
-                    
-                    -- ЗАМОРАЖИВАЕМ моба
-                    if v.Humanoid then
-                        v.Humanoid.WalkSpeed = 0
-                        v.Humanoid.JumpPower = 0
-                        v.Humanoid.PlatformStand = true
-                    end
-                    
-                    -- Отключаем CanCollide у ВСЕХ частей моба
-                    for _, part in pairs(v:GetDescendants()) do
-                        if part:IsA("BasePart") then
-                            part.CanCollide = false
-                        end
-                    end
-                    
-                    mobCount = mobCount + 1
-                end
-            end
-        end
-        
-        -- Обновляем инфо-панель
-        if mobCount > 0 then
-            InfoLabel.Text = "⚡ Мобов собрано: " .. mobCount .. " | Fast Attack активен"
-        end
-    end)
-end
-
--- Автофарм (УЛУЧШЕННЫЙ С ЗАЩИТОЙ)
+-- Автофарм цикл
 task.spawn(function()
     while task.wait() do
         if _G.AutoFarm and Player.Character and Player.Character:FindFirstChild("HumanoidRootPart") then
@@ -568,45 +369,31 @@ task.spawn(function()
                 -- 3. Атака
                 if target then
                     local weapon = EquipBest()
+                    -- Позиция атаки: сверху над мобом (чтобы не застревать в текстурах) и чуть сзади
+                    -- Y = 5 (высота), Z = 2 (дистанция)
+                    local targetPos = target.HumanoidRootPart.CFrame * CFrame.new(0, 5, 2)
                     
-                    -- ПРАВИЛЬНАЯ ПОЗИЦИЯ: НИЗКО над мобом (5 студов)
-                    local safePos = target.HumanoidRootPart.Position + Vector3.new(0, _G.FarmHeight, 0)
-                    
-                    -- Стоим НА МЕСТЕ, смотрим на моба
-                    Player.Character.HumanoidRootPart.CFrame = CFrame.new(safePos, target.HumanoidRootPart.Position)
+                    Player.Character.HumanoidRootPart.CFrame = CFrame.new(targetPos.Position, target.HumanoidRootPart.Position) -- Смотрим на моба
                     Player.Character.HumanoidRootPart.Velocity = Vector3.zero
                     
-                    -- Собираем всех мобов ПРЯМО К СЕБЕ (в одну точку)
-                    BringMobs(CFrame.new(safePos))
-                    
                     if weapon then 
-                        -- Fast Attack (УЛУЧШЕННЫЙ - с защитой от античита)
-                        if _G.FastAttack then
-                            local currentTime = tick()
-                            -- Задержка 0.1 сек - достаточно быстро, но безопасно
-                            if currentTime - AttackCooldown >= 0.1 then
-                                weapon:Activate()
-                                AttackCooldown = currentTime
-                                
-                                if _G.MobileAttackOnly then
-                                    local cam = Workspace.CurrentCamera
-                                    local cx = math.floor(cam.ViewportSize.X/2)
-                                    local cy = math.floor(cam.ViewportSize.Y/2)
-                                    
-                                    -- Уменьшаем количество кликов до 2 (было 3)
-                                    for i = 1, 2 do
-                                        task.spawn(function()
-                                            pcall(function()
-                                                VirtualInputManager:SendMouseButtonEvent(cx, cy, 0, true, game, 1)
-                                                task.wait(0.02) -- Небольшая задержка между кликами
-                                                VirtualInputManager:SendMouseButtonEvent(cx, cy, 0, false, game, 1)
-                                            end)
-                                        end)
-                                    end
-                                end
-                            end
+                        weapon:Activate()
+                        if _G.MobileAttackOnly then
+                            local cam = Workspace.CurrentCamera
+                            local cx = math.floor(cam.ViewportSize.X/2)
+                            local cy = math.floor(cam.ViewportSize.Y/2)
+                            task.spawn(function()
+                                pcall(function()
+                                    VirtualInputManager:SendMouseButtonEvent(cx, cy, 0, true, game, 1)
+                                    task.wait(0.02)
+                                    VirtualInputManager:SendMouseButtonEvent(cx, cy, 0, false, game, 1)
+                                end)
+                            end)
                         else
-                            weapon:Activate()
+                            pcall(function()
+                                VirtualUser:CaptureController()
+                                VirtualUser:ClickButton1(Vector2.new(800, 600), Workspace.CurrentCamera.CFrame)
+                            end)
                         end
                     end
                 end
@@ -615,7 +402,7 @@ task.spawn(function()
     end
 end)
 
--- ESP цикл
+-- ESP цикл с реальным отслеживанием спавна
 task.spawn(function()
     while task.wait(1) do
         pcall(function()
@@ -635,7 +422,7 @@ task.spawn(function()
                         t.Parent = b
                         t.Size = UDim2.new(1,0,1,0)
                         t.BackgroundTransparency = 1
-                        t.TextColor3 = Color3.fromRGB(255, 215, 0) -- Золотой цвет для серверных
+                        t.TextColor3 = Color3.fromRGB(255, 0, 0)
                         t.TextStrokeTransparency = 0
                         t.Font = Enum.Font.SourceSansBold
                         t.TextSize = 14
@@ -643,12 +430,14 @@ task.spawn(function()
                         b.Parent = fruit.Handle
                     end
                     
+                    -- Обновление дистанции
                     if fruit.Handle:FindFirstChild("FruitESP") and Player.Character and Player.Character:FindFirstChild("HumanoidRootPart") then
                         local dist = math.floor((Player.Character.HumanoidRootPart.Position - fruit.Handle.Position).Magnitude)
-                        fruit.Handle.FruitESP.TextLabel.Text = "🌟 " .. fruit.Name .. " [" .. dist .. "m]"
+                        fruit.Handle.FruitESP.TextLabel.Text = fruit.Name .. " [" .. dist .. "m]"
                     end
                 end
             else
+                -- Очистка ESP
                 for _, fruit in pairs(currentFruits) do
                     if fruit.Handle:FindFirstChild("FruitESP") then
                         fruit.Handle.FruitESP:Destroy()
@@ -658,16 +447,16 @@ task.spawn(function()
             
             -- Обновление таймера
             if #currentFruits > 0 then
-                FruitTimerLabel.Text = "🍎 Серверных фруктов: " .. #currentFruits .. " | След. ~" .. math.floor(FruitSpawnData.AverageSpawnTime/60) .. "м"
+                FruitTimerLabel.Text = "🍎 Фруктов: " .. #currentFruits .. " | След. через ~" .. math.floor(FruitSpawnData.AverageSpawnTime/60) .. "м"
             else
                 if FruitSpawnData.LastDespawnTime > 0 then
                     local elapsed = os.time() - FruitSpawnData.LastDespawnTime
                     local remaining = math.max(0, FruitSpawnData.AverageSpawnTime - elapsed)
                     local m = math.floor(remaining/60)
                     local s = remaining % 60
-                    FruitTimerLabel.Text = string.format("⏰ След. серверный фрукт: ~%02d:%02d", m, s)
+                    FruitTimerLabel.Text = string.format("⏰ Следующий фрукт: ~%02d:%02d", m, s)
                 else
-                    FruitTimerLabel.Text = "⏰ Ожидание серверного фрукта..."
+                    FruitTimerLabel.Text = "⏰ Ожидание данных о спавне..."
                 end
             end
         end)
@@ -678,45 +467,32 @@ end)
 RunService.Stepped:Connect(function()
     if _G.AutoFarm and Player.Character then
         for _, v in pairs(Player.Character:GetDescendants()) do
-            if v:IsA("BasePart") then 
-                v.CanCollide = false 
-            end
+            if v:IsA("BasePart") then v.CanCollide = false end
         end
     end
 end)
 
--- Hitbox Expander (ОПТИМИЗИРОВАННЫЙ - безопасный размер)
+-- Hitbox Expander (Reach Aura)
 task.spawn(function()
-    while task.wait(0.2) do
+    while task.wait(0.5) do
         if _G.ReachAura then
             pcall(function()
                 local enemies = Workspace:FindFirstChild("Enemies")
-                if not enemies then return end
-                
-                local playerPos = Player.Character and Player.Character:FindFirstChild("HumanoidRootPart")
-                if not playerPos then return end
-                
-                for _, v in pairs(enemies:GetChildren()) do
-                    if v:FindFirstChild("Humanoid") and v:FindFirstChild("HumanoidRootPart") and v.Humanoid.Health > 0 then
-                        local mobRoot = v.HumanoidRootPart
-                        
-                        -- Проверка дистанции (Magnitude Check защита)
-                        -- Не увеличиваем хитбокс, если моб дальше 60 студов
-                        local distance = (playerPos.Position - mobRoot.Position).Magnitude
-                        if distance > 60 then
-                            continue
-                        end
-                        
-                        -- Безопасный размер хитбокса (20x20x20)
-                        mobRoot.Size = Vector3.new(_G.HitboxSize, _G.HitboxSize, _G.HitboxSize)
-                        mobRoot.Transparency = 0.95
-                        mobRoot.CanCollide = false
-                        mobRoot.Massless = true
-                        
-                        -- Отключаем все коллизии у всех частей
-                        for _, part in pairs(v:GetDescendants()) do
-                            if part:IsA("BasePart") then
-                                part.CanCollide = false
+                if enemies then
+                    for _, v in pairs(enemies:GetChildren()) do
+                        if v:FindFirstChild("Humanoid") and v:FindFirstChild("HumanoidRootPart") and v.Humanoid.Health > 0 then
+                            v.HumanoidRootPart.Size = Vector3.new(60, 60, 60)
+                            v.HumanoidRootPart.Transparency = 0.8
+                            v.HumanoidRootPart.CanCollide = false
+                            -- Фикс: также увеличиваем зону коллизии, чтобы клики проходили
+                            for _, part in pairs(v:GetChildren()) do
+                                if part:IsA("BasePart") then
+                                    part.CanCollide = false
+                                end
+                            end
+                            -- Принудительно устанавливаем позицию HRP (иногда сбивается)
+                            if v:FindFirstChild("Head") then
+                                v.HumanoidRootPart.CFrame = v.Head.CFrame
                             end
                         end
                     end
@@ -726,23 +502,22 @@ task.spawn(function()
     end
 end)
 
--- Авто-статы
+-- Авто-прокачка статов (Melee)
 task.spawn(function()
-    while task.wait(0.5) do
+    while task.wait(1) do
         if _G.AutoStats then
             pcall(function()
-                local currentTime = tick()
-                if currentTime - LastStatUpgrade >= 0.1 then
-                    local points = Player.Data.Points.Value
-                    if points > 0 then
-                        local args = {
-                            [1] = "AddPoint",
-                            [2] = _G.StatToUpgrade,
-                            [3] = 3
-                        }
-                        ReplicatedStorage.Remotes.CommF_:InvokeServer(unpack(args))
-                        LastStatUpgrade = currentTime
-                    end
+                local args = {
+                    [1] = "AddPoint",
+                    [2] = "Melee",
+                    [3] = 1
+                }
+                ReplicatedStorage.Remotes.CommF_:InvokeServer(unpack(args))
+                
+                -- Если очков много, качаем и защиту
+                local points = Player.Data.Points.Value
+                if points > 0 then
+                    ReplicatedStorage.Remotes.CommF_:InvokeServer("AddPoint", "Defense", 1)
                 end
             end)
         end
@@ -750,20 +525,18 @@ task.spawn(function()
 end)
 
 -- Анти-кик
-pcall(function()
-    local mt = getrawmetatable(game)
-    local oldNamecall = mt.__namecall
-    setreadonly(mt, false)
-    mt.__namecall = newcclosure(function(...)
-        local method = getnamecallmethod()
-        if method == "Kick" then
-            return wait(9e9)
-        end
-        return oldNamecall(...)
-    end)
-    setreadonly(mt, true)
-    print("✅ Анти-кик активирован")
+local mt = getrawmetatable(game)
+local oldNamecall = mt.__namecall
+setreadonly(mt, false)
+mt.__namecall = newcclosure(function(...)
+    local method = getnamecallmethod()
+    local args = {...}
+    if method == "Kick" then
+        return wait(9e9)
+    end
+    return oldNamecall(...)
 end)
+setreadonly(mt, true)
 
 -- Анти-AFK
 Player.Idled:Connect(function()
@@ -771,25 +544,6 @@ Player.Idled:Connect(function()
     VirtualUser:ClickButton2(Vector2.new())
 end)
 
--- Защита от падения
-task.spawn(function()
-    while task.wait(0.5) do
-        if Player.Character and Player.Character:FindFirstChild("HumanoidRootPart") then
-            if Player.Character.HumanoidRootPart.Position.Y < -500 then
-                Player.Character.HumanoidRootPart.CFrame = CFrame.new(
-                    Player.Character.HumanoidRootPart.Position.X,
-                    100,
-                    Player.Character.HumanoidRootPart.Position.Z
-                )
-            end
-        end
-    end
-end)
-
-print("✅ Blox Fruits Script v5 MEGA загружен!")
-print("📱 Нажми кнопку MENU")
-print("🍎 Отслеживание ТОЛЬКО серверных фруктов")
-print("⚡ Fast Attack + Bring Mobs + Увеличенные хитбоксы")
-print("🛡️ Фарм с высоты " .. _G.FarmHeight .. " стадов для защиты")
-print("🌐 Server Hop: Автопоиск фруктов на других серверах")
-print("⏰ Проверка серверов каждые " .. math.floor(_G.ServerHopDelay/60) .. " минут")
+print("✅ Blox Fruits Script v3 загружен!")
+print("📱 Нажми кнопку MENU для открытия")
+print("🍎 Реальное отслеживание спавна фруктов активировано!")
