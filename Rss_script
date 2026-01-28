@@ -14,6 +14,7 @@ _G.AutoQuest = false
 _G.FruitESP = false
 _G.AutoCollectFruit = false
 _G.ReachAura = true -- Включено по умолчанию для удобства
+_G.AutoStats = false -- Авто-статы
 _G.AttackDist = 3
 _G.MobileAttackOnly = true
 
@@ -123,6 +124,7 @@ CreateSwitch("Auto Farm", _G.AutoFarm, function(val) _G.AutoFarm = val end)
 CreateSwitch("Auto Quest", _G.AutoQuest, function(val) _G.AutoQuest = val end)
 CreateSwitch("Fruit ESP", _G.FruitESP, function(val) _G.FruitESP = val end)
 CreateSwitch("Auto Collect Fruit", _G.AutoCollectFruit, function(val) _G.AutoCollectFruit = val end)
+CreateSwitch("Auto Stats (Melee)", _G.AutoStats, function(val) _G.AutoStats = val end)
 CreateSwitch("Hitbox Reach", _G.ReachAura, function(val) _G.ReachAura = val end)
 
 -- Кнопка закрытия
@@ -473,10 +475,42 @@ task.spawn(function()
                     for _, v in pairs(enemies:GetChildren()) do
                         if v:FindFirstChild("Humanoid") and v:FindFirstChild("HumanoidRootPart") and v.Humanoid.Health > 0 then
                             v.HumanoidRootPart.Size = Vector3.new(60, 60, 60)
-                            v.HumanoidRootPart.Transparency = 0.8 -- Видно, но прозрачно
+                            v.HumanoidRootPart.Transparency = 0.8
                             v.HumanoidRootPart.CanCollide = false
+                            -- Фикс: также увеличиваем зону коллизии, чтобы клики проходили
+                            for _, part in pairs(v:GetChildren()) do
+                                if part:IsA("BasePart") then
+                                    part.CanCollide = false
+                                end
+                            end
+                            -- Принудительно устанавливаем позицию HRP (иногда сбивается)
+                            if v:FindFirstChild("Head") then
+                                v.HumanoidRootPart.CFrame = v.Head.CFrame
+                            end
                         end
                     end
+                end
+            end)
+        end
+    end
+end)
+
+-- Авто-прокачка статов (Melee)
+task.spawn(function()
+    while task.wait(1) do
+        if _G.AutoStats then
+            pcall(function()
+                local args = {
+                    [1] = "AddPoint",
+                    [2] = "Melee",
+                    [3] = 1
+                }
+                ReplicatedStorage.Remotes.CommF_:InvokeServer(unpack(args))
+                
+                -- Если очков много, качаем и защиту
+                local points = Player.Data.Points.Value
+                if points > 0 then
+                    ReplicatedStorage.Remotes.CommF_:InvokeServer("AddPoint", "Defense", 1)
                 end
             end)
         end
