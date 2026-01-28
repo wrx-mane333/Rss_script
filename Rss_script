@@ -13,6 +13,7 @@ _G.AutoFarm = false
 _G.AutoQuest = false
 _G.FruitESP = false
 _G.AutoCollectFruit = false
+_G.ReachAura = true -- Включено по умолчанию для удобства
 _G.AttackDist = 3
 _G.MobileAttackOnly = true
 
@@ -122,6 +123,7 @@ CreateSwitch("Auto Farm", _G.AutoFarm, function(val) _G.AutoFarm = val end)
 CreateSwitch("Auto Quest", _G.AutoQuest, function(val) _G.AutoQuest = val end)
 CreateSwitch("Fruit ESP", _G.FruitESP, function(val) _G.FruitESP = val end)
 CreateSwitch("Auto Collect Fruit", _G.AutoCollectFruit, function(val) _G.AutoCollectFruit = val end)
+CreateSwitch("Hitbox Reach", _G.ReachAura, function(val) _G.ReachAura = val end)
 
 -- Кнопка закрытия
 local CloseBtn = Instance.new("TextButton")
@@ -358,9 +360,11 @@ task.spawn(function()
                 -- 3. Атака
                 if target then
                     local weapon = EquipBest()
-                    local targetPos = target.HumanoidRootPart.CFrame * CFrame.new(0, 2, -_G.AttackDist)
+                    -- Позиция атаки: сверху над мобом (чтобы не застревать в текстурах) и чуть сзади
+                    -- Y = 5 (высота), Z = 2 (дистанция)
+                    local targetPos = target.HumanoidRootPart.CFrame * CFrame.new(0, 5, 2)
                     
-                    Player.Character.HumanoidRootPart.CFrame = targetPos
+                    Player.Character.HumanoidRootPart.CFrame = CFrame.new(targetPos.Position, target.HumanoidRootPart.Position) -- Смотрим на моба
                     Player.Character.HumanoidRootPart.Velocity = Vector3.zero
                     
                     if weapon then 
@@ -455,6 +459,26 @@ RunService.Stepped:Connect(function()
     if _G.AutoFarm and Player.Character then
         for _, v in pairs(Player.Character:GetDescendants()) do
             if v:IsA("BasePart") then v.CanCollide = false end
+        end
+    end
+end)
+
+-- Hitbox Expander (Reach Aura)
+task.spawn(function()
+    while task.wait(0.5) do
+        if _G.ReachAura then
+            pcall(function()
+                local enemies = Workspace:FindFirstChild("Enemies")
+                if enemies then
+                    for _, v in pairs(enemies:GetChildren()) do
+                        if v:FindFirstChild("Humanoid") and v:FindFirstChild("HumanoidRootPart") and v.Humanoid.Health > 0 then
+                            v.HumanoidRootPart.Size = Vector3.new(60, 60, 60)
+                            v.HumanoidRootPart.Transparency = 0.8 -- Видно, но прозрачно
+                            v.HumanoidRootPart.CanCollide = false
+                        end
+                    end
+                end
+            end)
         end
     end
 end)
