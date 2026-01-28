@@ -3,86 +3,89 @@ local Workspace = game:GetService("Workspace")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 local VirtualUser = game:GetService("VirtualUser")
-local UserInputService = game:GetService("UserInputService")
 
 local Player = Players.LocalPlayer
 local _G = _G or {} 
 
--- Настройки по умолчанию
-_G.AutoFarm = false -- Изначально выключено, включаем через меню
+-- // НАСТРОЙКИ //
+_G.AutoFarm = false
 _G.AutoQuest = false
 _G.FruitESP = false
-_G.AttackDist = 60
+_G.AttackDist = 50 -- Дистанция атаки
 
--- // GUI: Мобильное Меню //
+-- // GUI ИНТЕРФЕЙС //
 local ScreenGui = Instance.new("ScreenGui")
-ScreenGui.Name = "BloxFruitMobileGUI"
+ScreenGui.Name = "BloxFruitMobileGUI_v2"
 ScreenGui.Parent = Player:WaitForChild("PlayerGui")
 ScreenGui.ResetOnSpawn = false
-ScreenGui.DisplayOrder = 999 -- Поверх всего
+ScreenGui.DisplayOrder = 1000 -- Максимальный приоритет
 
--- Кнопка открытия/закрытия (плавающая)
+-- Кнопка МЕНЮ (Фиксированная позиция для надежности)
 local ToggleBtn = Instance.new("TextButton")
 ToggleBtn.Name = "ToggleBtn"
 ToggleBtn.Parent = ScreenGui
-ToggleBtn.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
-ToggleBtn.Position = UDim2.new(0.1, 0, 0.2, 0) -- Позиция слева
-ToggleBtn.Size = UDim2.new(0, 50, 0, 50) -- Квадратная кнопка
+ToggleBtn.BackgroundColor3 = Color3.fromRGB(0, 120, 255) -- Синяя, заметная
+ToggleBtn.Position = UDim2.new(0.05, 0, 0.15, 0) -- Слева сверху
+ToggleBtn.Size = UDim2.new(0, 60, 0, 60)
 ToggleBtn.Font = Enum.Font.SourceSansBold
 ToggleBtn.Text = "MENU"
 ToggleBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-ToggleBtn.TextSize = 14
+ToggleBtn.TextSize = 16
 ToggleBtn.ZIndex = 100
-ToggleBtn.BorderSizePixel = 0
-ToggleBtn.Active = true -- Важно для взаимодействия
+ToggleBtn.BorderSizePixel = 2
+ToggleBtn.BorderColor3 = Color3.fromRGB(255, 255, 255)
+ToggleBtn.Active = true
 
 local UICornerBtn = Instance.new("UICorner")
-UICornerBtn.CornerRadius = UDim.new(0.5, 0) -- Круглая кнопка
+UICornerBtn.CornerRadius = UDim.new(0.5, 0) -- Круглая
 UICornerBtn.Parent = ToggleBtn
 
--- Основное меню (Фрейм)
+-- Основное окно
 local MainFrame = Instance.new("Frame")
 MainFrame.Name = "MainFrame"
 MainFrame.Parent = ScreenGui
-MainFrame.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+MainFrame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
 MainFrame.Position = UDim2.new(0.5, 0, 0.5, 0)
 MainFrame.AnchorPoint = Vector2.new(0.5, 0.5)
-MainFrame.Size = UDim2.new(0.4, 0, 0.5, 0) -- Адаптивный размер (40% ширины экрана)
-MainFrame.Visible = false -- Скрыто по умолчанию
-MainFrame.BorderSizePixel = 0
+MainFrame.Size = UDim2.new(0.5, 0, 0.6, 0) -- Побольше для удобства
+MainFrame.Visible = false
 MainFrame.ZIndex = 101
+MainFrame.BorderSizePixel = 0
 
 local UICornerFrame = Instance.new("UICorner")
-UICornerFrame.CornerRadius = UDim.new(0.1, 0)
+UICornerFrame.CornerRadius = UDim.new(0.05, 0)
 UICornerFrame.Parent = MainFrame
 
+-- Заголовок
 local Title = Instance.new("TextLabel")
 Title.Parent = MainFrame
+Title.Text = "BLOX FRUITS SCRIPT"
+Title.Size = UDim2.new(1, 0, 0.15, 0)
 Title.BackgroundColor3 = Color3.fromRGB(255, 85, 0)
-Title.Size = UDim2.new(1, 0, 0.2, 0)
-Title.Font = Enum.Font.SourceSansBold
-Title.Text = "SCRIPT MENU"
 Title.TextColor3 = Color3.fromRGB(255, 255, 255)
-Title.TextSize = 20
-Title.BackgroundTransparency = 0
-Title.BorderSizePixel = 0
+Title.Font = Enum.Font.SourceSansBold
+Title.TextSize = 18
 Title.ZIndex = 102
 
 local UICornerTitle = Instance.new("UICorner")
 UICornerTitle.CornerRadius = UDim.new(0.1, 0)
 UICornerTitle.Parent = Title
 
--- Функция создания кнопок переключения
-local function CreateToggle(name, text, defaultVal, callback)
+-- Логика переключения меню
+ToggleBtn.Activated:Connect(function()
+    MainFrame.Visible = not MainFrame.Visible
+end)
+
+-- Функция создания кнопок (Toggle)
+local function CreateSwitch(text, defaultVal, callback)
     local btn = Instance.new("TextButton")
-    btn.Name = name
     btn.Parent = MainFrame
-    btn.BackgroundColor3 = defaultVal and Color3.fromRGB(0, 255, 0) or Color3.fromRGB(255, 0, 0)
-    btn.Size = UDim2.new(0.8, 0, 0.15, 0)
-    btn.Position = UDim2.new(0.1, 0, 0.3 + (#MainFrame:GetChildren() - 2) * 0.18, 0) -- Авто-позиционирование
-    btn.Font = Enum.Font.SourceSans
+    btn.BackgroundColor3 = defaultVal and Color3.fromRGB(0, 200, 0) or Color3.fromRGB(200, 0, 0)
+    btn.Size = UDim2.new(0.9, 0, 0.15, 0)
+    btn.Position = UDim2.new(0.05, 0, 0.2 + (#MainFrame:GetChildren() - 2) * 0.18, 0)
     btn.Text = text .. ": " .. (defaultVal and "ON" or "OFF")
     btn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    btn.Font = Enum.Font.SourceSansBold
     btn.TextSize = 16
     btn.ZIndex = 103
     
@@ -90,29 +93,28 @@ local function CreateToggle(name, text, defaultVal, callback)
     corner.CornerRadius = UDim.new(0.2, 0)
     corner.Parent = btn
     
-    btn.Activated:Connect(function() -- Используем Activated для лучшей совместимости с мобилками
-        local newVal = not (btn.Text:find("ON") ~= nil)
-        btn.Text = text .. ": " .. (newVal and "ON" or "OFF")
-        btn.BackgroundColor3 = newVal and Color3.fromRGB(0, 255, 0) or Color3.fromRGB(255, 0, 0)
-        callback(newVal)
+    btn.Activated:Connect(function()
+        local isOn = not (btn.Text:find("ON") ~= nil)
+        btn.Text = text .. ": " .. (isOn and "ON" or "OFF")
+        btn.BackgroundColor3 = isOn and Color3.fromRGB(0, 200, 0) or Color3.fromRGB(200, 0, 0)
+        callback(isOn)
     end)
 end
 
--- Добавляем переключатели
-CreateToggle("AutoFarmBtn", "Auto Farm", _G.AutoFarm, function(val) _G.AutoFarm = val end)
-CreateToggle("AutoQuestBtn", "Auto Quest", _G.AutoQuest, function(val) _G.AutoQuest = val end)
-CreateToggle("ESPBtn", "Fruit ESP", _G.FruitESP, function(val) _G.FruitESP = val end)
+-- Добавляем кнопки
+CreateSwitch("Auto Farm", _G.AutoFarm, function(val) _G.AutoFarm = val end)
+CreateSwitch("Auto Quest", _G.AutoQuest, function(val) _G.AutoQuest = val end)
+CreateSwitch("Fruit ESP", _G.FruitESP, function(val) _G.FruitESP = val end)
 
--- Кнопка закрытия внутри меню
+-- Кнопка закрытия
 local CloseBtn = Instance.new("TextButton")
 CloseBtn.Parent = MainFrame
-CloseBtn.BackgroundColor3 = Color3.fromRGB(255, 0, 0)
-CloseBtn.Size = UDim2.new(0.3, 0, 0.15, 0)
-CloseBtn.Position = UDim2.new(0.35, 0, 0.8, 0)
-CloseBtn.Text = "CLOSE"
+CloseBtn.BackgroundColor3 = Color3.fromRGB(100, 100, 100)
+CloseBtn.Size = UDim2.new(0.4, 0, 0.12, 0)
+CloseBtn.Position = UDim2.new(0.3, 0, 0.85, 0)
+CloseBtn.Text = "HIDE MENU"
 CloseBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
 CloseBtn.Font = Enum.Font.SourceSansBold
-CloseBtn.TextSize = 14
 CloseBtn.ZIndex = 103
 
 local UICornerClose = Instance.new("UICorner")
@@ -123,62 +125,8 @@ CloseBtn.Activated:Connect(function()
     MainFrame.Visible = false
 end)
 
--- Улучшенная логика: Клик vs Перетаскивание
-local dragging = false
-local dragStart = Vector3.new()
-local startPos = UDim2.new()
+-- // ЛОГИКА СКРИПТА //
 
-ToggleBtn.InputBegan:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-        dragging = true
-        dragStart = input.Position
-        startPos = ToggleBtn.Position
-    end
-end)
-
-ToggleBtn.InputChanged:Connect(function(input)
-    if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
-        local delta = input.Position - dragStart
-        ToggleBtn.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
-    end
-end)
-
-ToggleBtn.InputEnded:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-        dragging = false
-        -- Проверяем, было ли это нажатие (клик) или перетаскивание
-        local dist = (input.Position - dragStart).Magnitude
-        if dist < 5 then -- Если палец сдвинулся меньше чем на 5 пикселей, считаем это кликом
-            MainFrame.Visible = not MainFrame.Visible
-        end
-    end
-end)
-
--- // ФУНКЦИЯ СОЗДАНИЯ ESP //
-local function CreateESP(part, name)
-    if part:FindFirstChild("FruitESP") then return end
-    
-    local billboard = Instance.new("BillboardGui")
-    billboard.Name = "FruitESP"
-    billboard.Adornee = part
-    billboard.Size = UDim2.new(0, 200, 0, 50)
-    billboard.StudsOffset = Vector3.new(0, 2, 0)
-    billboard.AlwaysOnTop = true
-    
-    local label = Instance.new("TextLabel")
-    label.Parent = billboard
-    label.Size = UDim2.new(1, 0, 1, 0)
-    label.BackgroundTransparency = 1
-    label.TextColor3 = Color3.fromRGB(255, 0, 0) -- Красный цвет
-    label.TextStrokeTransparency = 0
-    label.Font = Enum.Font.SourceSansBold
-    label.TextSize = 14
-    label.Text = name
-    
-    billboard.Parent = part
-end
-
--- // ФУНКЦИЯ ПОЛУЧЕНИЯ ТЕКУЩЕГО КВЕСТА //
 local function GetQuestTarget()
     local gui = Player:FindFirstChild("PlayerGui")
     if gui and gui:FindFirstChild("Main") and gui.Main:FindFirstChild("Quest") then
@@ -194,15 +142,11 @@ local function GetQuestTarget()
     return nil
 end
 
--- // ФУНКЦИЯ ЭКИПИРОВКИ ЛУЧШЕГО ОРУЖИЯ //
 local function EquipBest()
     local char = Player.Character
     if not char then return end
-    
-    -- Если оружие уже в руках, ничего не делаем
-    local currentTool = char:FindFirstChildOfClass("Tool")
-    if currentTool then return currentTool end
-
+    local tool = char:FindFirstChildOfClass("Tool")
+    if tool then return tool end
     for _, t in pairs(Player.Backpack:GetChildren()) do
         if t:IsA("Tool") and (t.ToolTip == "Melee" or t.Name == "Combat" or t.ToolTip == "Sword") then
             char.Humanoid:EquipTool(t)
@@ -211,69 +155,47 @@ local function EquipBest()
     end
 end
 
--- // ПОИСК БЛИЖАЙШЕГО ВРАГА //
-local function GetClosestEnemy(targetName)
-    local closest = nil
-    local minDist = math.huge
-    local myRoot = Player.Character and Player.Character:FindFirstChild("HumanoidRootPart")
-    
-    if not myRoot then return nil end
-    local enemies = Workspace:FindFirstChild("Enemies")
-    if not enemies then return nil end
-
-    for _, v in pairs(enemies:GetChildren()) do
-        if v:FindFirstChild("Humanoid") and v.Humanoid.Health > 0 and v:FindFirstChild("HumanoidRootPart") then
-            if not targetName or string.find(v.Name, targetName) then
-                local dist = (v.HumanoidRootPart.Position - myRoot.Position).Magnitude
-                if dist < minDist then
-                    minDist = dist
-                    closest = v
-                end
-            end
-        end
-    end
-    return closest
-end
-
--- // ОСНОВНОЙ ЦИКЛ //
+-- Автофарм цикл
 task.spawn(function()
-    while task.wait() do -- Можно поставить task.wait(0.1) для снижения нагрузки
+    while task.wait() do
         if _G.AutoFarm and Player.Character and Player.Character:FindFirstChild("HumanoidRootPart") then
             pcall(function()
-                -- 1. Берем квест
+                -- 1. Квест
                 if _G.AutoQuest then
-                    local gui = Player:FindFirstChild("PlayerGui")
-                    if gui and gui:FindFirstChild("Main") and not gui.Main.Quest.Visible then
+                    local gui = Player.PlayerGui
+                    if gui.Main.Quest.Visible == false then
                         local lvl = Player.Data.Level.Value
-                        local args = nil
-                        if lvl < 10 then args = {"StartQuest", "BanditQuest1", 1}
-                        elseif lvl < 15 then args = {"StartQuest", "JungleQuest", 1}
-                        else args = {"StartQuest", "JungleQuest", 2} end
-                        
-                        if args then
-                            ReplicatedStorage.Remotes.CommF_:InvokeServer(unpack(args))
+                        local remote = ReplicatedStorage.Remotes.CommF_
+                        if lvl < 10 then remote:InvokeServer("StartQuest", "BanditQuest1", 1)
+                        elseif lvl < 15 then remote:InvokeServer("StartQuest", "JungleQuest", 1)
+                        else remote:InvokeServer("StartQuest", "JungleQuest", 2) end
+                    end
+                end
+
+                -- 2. Цель
+                local targetName = GetQuestTarget()
+                local target = nil
+                local enemies = Workspace:FindFirstChild("Enemies")
+                if enemies then
+                    for _, v in pairs(enemies:GetChildren()) do
+                        if v:FindFirstChild("Humanoid") and v.Humanoid.Health > 0 and v:FindFirstChild("HumanoidRootPart") then
+                            if not targetName or string.find(v.Name, targetName) then
+                                target = v
+                                break -- Бьем первого найденного
+                            end
                         end
                     end
                 end
 
-                -- 2. Ищем цель
-                local targetName = GetQuestTarget()
-                local target = GetClosestEnemy(targetName)
-
-                -- 3. Бой и Движение
-                if target and target:FindFirstChild("HumanoidRootPart") then
+                -- 3. Атака
+                if target then
                     local weapon = EquipBest()
-                    
-                    -- Прямое зависание над мобом (без наклона)
                     local targetPos = target.HumanoidRootPart.CFrame * CFrame.new(0, _G.AttackDist, 0)
                     
                     Player.Character.HumanoidRootPart.CFrame = targetPos
                     Player.Character.HumanoidRootPart.Velocity = Vector3.zero
                     
-                    -- Удары (Kill Aura)
                     if weapon then weapon:Activate() end
-                    
-                    -- Эмуляция кликов (для некоторых оружий)
                     VirtualUser:CaptureController()
                     VirtualUser:ClickButton1(Vector2.new(0,0), Workspace.CurrentCamera.CFrame)
                 end
@@ -282,27 +204,44 @@ task.spawn(function()
     end
 end)
 
--- // ESP ЦИКЛ (ОБНОВЛЕНИЕ ДИСТАНЦИИ) //
+-- ESP цикл
 task.spawn(function()
-    while task.wait(0.5) do -- Обновляем каждые 0.5 сек для оптимизации
-        if _G.FruitESP and Player.Character and Player.Character:FindFirstChild("HumanoidRootPart") then
+    while task.wait(0.5) do
+        if _G.FruitESP then
             pcall(function()
                 for _, v in pairs(Workspace:GetChildren()) do
                     if string.find(v.Name, "Fruit") and v:IsA("Tool") and v:FindFirstChild("Handle") then
-                        CreateESP(v.Handle, v.Name)
-                        
-                        -- Обновляем текст (дистанция)
-                        local dist = math.floor((Player.Character.HumanoidRootPart.Position - v.Handle.Position).Magnitude)
+                        if not v.Handle:FindFirstChild("FruitESP") then
+                            local b = Instance.new("BillboardGui")
+                            b.Name = "FruitESP"
+                            b.Adornee = v.Handle
+                            b.Size = UDim2.new(0, 200, 0, 50)
+                            b.StudsOffset = Vector3.new(0, 2, 0)
+                            b.AlwaysOnTop = true
+                            
+                            local t = Instance.new("TextLabel")
+                            t.Parent = b
+                            t.Size = UDim2.new(1,0,1,0)
+                            t.BackgroundTransparency = 1
+                            t.TextColor3 = Color3.fromRGB(255, 0, 0)
+                            t.TextStrokeTransparency = 0
+                            t.Font = Enum.Font.SourceSansBold
+                            t.TextSize = 14
+                            t.Text = v.Name
+                            b.Parent = v.Handle
+                        end
+                        -- Обновление дистанции
                         if v.Handle:FindFirstChild("FruitESP") then
+                            local dist = math.floor((Player.Character.HumanoidRootPart.Position - v.Handle.Position).Magnitude)
                             v.Handle.FruitESP.TextLabel.Text = v.Name .. " [" .. dist .. "m]"
                         end
                     end
                 end
             end)
         else
-            -- Если ESP выключен, удаляем старые метки
+            -- Очистка
             for _, v in pairs(Workspace:GetChildren()) do
-                if string.find(v.Name, "Fruit") and v:IsA("Tool") and v:FindFirstChild("Handle") and v.Handle:FindFirstChild("FruitESP") then
+                if v:FindFirstChild("Handle") and v.Handle:FindFirstChild("FruitESP") then
                     v.Handle.FruitESP:Destroy()
                 end
             end
@@ -310,14 +249,11 @@ task.spawn(function()
     end
 end)
 
--- // Noclip (Оптимизированный) //
+-- Noclip (Delta X fix)
 RunService.Stepped:Connect(function()
     if _G.AutoFarm and Player.Character then
-        -- Отключаем коллизию только для персонажа, чтобы не застревать
         for _, v in pairs(Player.Character:GetDescendants()) do
-            if v:IsA("BasePart") and v.CanCollide then
-                v.CanCollide = false
-            end
+            if v:IsA("BasePart") then v.CanCollide = false end
         end
     end
 end)
