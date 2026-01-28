@@ -1,4 +1,4 @@
-local Players = game:GetService("Players")
+local Players = game:GetService("Players")+
 local Workspace = game:GetService("Workspace")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
@@ -109,6 +109,18 @@ local UICornerTitle = Instance.new("UICorner")
 UICornerTitle.CornerRadius = UDim.new(0.1, 0)
 UICornerTitle.Parent = Title
 
+-- SCROLLING FRAME (для прокрутки кнопок)
+local ScrollFrame = Instance.new("ScrollingFrame")
+ScrollFrame.Name = "ScrollFrame"
+ScrollFrame.Parent = MainFrame
+ScrollFrame.Position = UDim2.new(0.05, 0, 0.12, 0)
+ScrollFrame.Size = UDim2.new(0.9, 0, 0.65, 0)
+ScrollFrame.BackgroundTransparency = 1
+ScrollFrame.ScrollBarThickness = 6
+ScrollFrame.ZIndex = 102
+ScrollFrame.CanvasSize = UDim2.new(0, 0, 0, 0) -- Будет обновляться автоматически
+ScrollFrame.ScrollBarImageColor3 = Color3.fromRGB(255, 85, 0)
+
 -- Логика переключения меню
 ToggleBtn.Activated:Connect(function()
     MainFrame.Visible = not MainFrame.Visible
@@ -118,10 +130,10 @@ local ButtonCount = 0
 
 local function CreateSwitch(text, defaultVal, callback)
     local btn = Instance.new("TextButton")
-    btn.Parent = MainFrame
+    btn.Parent = ScrollFrame -- Теперь кнопки в ScrollFrame!
     btn.BackgroundColor3 = defaultVal and Color3.fromRGB(0, 200, 0) or Color3.fromRGB(200, 0, 0)
-    btn.Size = UDim2.new(0.9, 0, 0.1, 0)
-    btn.Position = UDim2.new(0.05, 0, 0.12 + ButtonCount * 0.11, 0)
+    btn.Size = UDim2.new(1, -10, 0, 40) -- Фиксированная высота
+    btn.Position = UDim2.new(0, 5, 0, ButtonCount * 45) -- Отступ между кнопками
     btn.Text = text .. ": " .. (defaultVal and "ON" or "OFF")
     btn.TextColor3 = Color3.fromRGB(255, 255, 255)
     btn.Font = Enum.Font.SourceSansBold
@@ -140,6 +152,9 @@ local function CreateSwitch(text, defaultVal, callback)
     end)
     
     ButtonCount = ButtonCount + 1
+    
+    -- Обновляем размер Canvas для прокрутки
+    ScrollFrame.CanvasSize = UDim2.new(0, 0, 0, ButtonCount * 45 + 10)
 end
 
 -- Добавляем кнопки
@@ -204,55 +219,20 @@ UICornerTimer.Parent = FruitTimerLabel
 
 -- // ЛОГИКА СКРИПТА //
 
--- Server Hop функция (поиск фруктов на других серверах)
+-- Server Hop функция (ИСПРАВЛЕННАЯ - без HttpGet)
 local TeleportService = game:GetService("TeleportService")
-local HttpService = game:GetService("HttpService")
 
 local LastServerHopCheck = 0
 
 local function ServerHop()
     pcall(function()
+        print("🔍 Ищу другой сервер...")
+        
+        -- Простой метод - телепорт на случайный сервер
         local PlaceId = game.PlaceId
-        local JobId = game.JobId
         
-        print("🔍 Ищу сервер с фруктами...")
-        
-        -- Получаем список серверов
-        local servers = {}
-        local cursor = ""
-        
-        repeat
-            local url = string.format(
-                "https://games.roblox.com/v1/games/%d/servers/Public?sortOrder=Asc&limit=100&cursor=%s",
-                PlaceId,
-                cursor
-            )
-            
-            local success, result = pcall(function()
-                return HttpService:JSONDecode(game:HttpGet(url))
-            end)
-            
-            if success and result.data then
-                for _, server in pairs(result.data) do
-                    -- Пропускаем текущий сервер
-                    if server.id ~= JobId and server.playing < server.maxPlayers then
-                        table.insert(servers, server.id)
-                    end
-                end
-                cursor = result.nextPageCursor or ""
-            else
-                break
-            end
-        until cursor == "" or #servers >= 10 -- Проверяем максимум 10 серверов
-        
-        if #servers > 0 then
-            -- Выбираем случайный сервер
-            local randomServer = servers[math.random(1, #servers)]
-            print("🌐 Телепортируюсь на другой сервер...")
-            TeleportService:TeleportToPlaceInstance(PlaceId, randomServer, Player)
-        else
-            print("❌ Не найдено доступных серверов")
-        end
+        -- Используем TeleportService напрямую
+        TeleportService:Teleport(PlaceId, Player)
     end)
 end
 
@@ -270,8 +250,9 @@ local function CheckForFruitsAndHop()
         local fruits = FindAllFruits()
         
         if #fruits == 0 then
-            print("🍎 Фруктов нет на этом сервере. Ищу другой...")
-            task.wait(2)
+            print("🍎 Фруктов нет на этом сервере. Меняю сервер через 5 сек...")
+            FruitTimerLabel.Text = "🌐 Меняю сервер (нет фруктов)..."
+            task.wait(5)
             ServerHop()
         else
             print("✅ Фрукты найдены на этом сервере: " .. #fruits)
@@ -281,6 +262,8 @@ end
 
 -- Автоматическая проверка серверов
 task.spawn(function()
+    task.wait(10) -- Ждем 10 сек после загрузки
+    
     while task.wait(60) do -- Проверка каждую минуту
         if _G.ServerHop then
             CheckForFruitsAndHop()
